@@ -172,6 +172,27 @@ async function getPairingCodeForNumber(number, maxWaitMs = 15000) {
   throw new Error(`Timeout: Pairing code not generated for ${number}`);
 }
 
+async function getQRCodeForSession(sessionId, maxWaitMs = 30000) {
+  const pairingFolder = path.join(__dirname, 'kingbadboitimewisher', 'pairing');
+  const safeName = (sessionId + "@s.whatsapp.net").replace(/[^a-zA-Z0-9@._-]/g, '_');
+  const signalFile = path.join(pairingFolder, `qr_${safeName}.json`);
+  const startTime = Date.now();
+
+  while (Date.now() - startTime < maxWaitMs) {
+    if (await exists(signalFile)) {
+      try {
+        const raw = await fs.readFile(signalFile, 'utf-8');
+        const data = JSON.parse(raw);
+        if (data.qr && data.path) {
+          return data;
+        }
+      } catch (e) {}
+    }
+    await sleep(1000);
+  }
+  throw new Error(`Timeout: QR Code not generated for session ${sessionId}`);
+}
+
 // ========== START COMMAND ==========
 bot.onText(/\/start/, async (msg) => {
   const chatId = msg.chat.id;
@@ -223,94 +244,60 @@ bot.onText(/\/pair(?:\s+(.+))?/, async (msg, match) => {
     return sendGroupMessage(chatId, msg.message_id);
   }
 
-  // 🔥 PRIVATE CHAT MEIN NORMAL PAIRING PROCESS
-  // Join gate removed
-
-  if (!text) {
-    userStates.set(userId, { step: 'awaiting_number' });
-    return bot.sendMessage(chatId, 
-      `🔐 *Please send your WhatsApp number*\n\nExample: /pair 923xxxxxxxxx\n\nOr just type: 923xxxxxxxxx`,
-      { parse_mode: 'Markdown' }
-    );
-  }
-
-  if (/[a-z]/i.test(text)) {
-    return bot.sendMessage(chatId, '❌ *Letters are not allowed.*\n\nPlease send only numbers.', { parse_mode: 'Markdown' });
-  }
-  
-  if (!/^\d{7,15}$/.test(text)) {
-    return bot.sendMessage(chatId, '❌ *Invalid format.*\n\nPlease send a valid WhatsApp number.\nExample: 923xxxxxxxxx', { parse_mode: 'Markdown' });
-  }
-  
-  if (text.startsWith('0')) {
-    return bot.sendMessage(chatId, '❌ *Numbers starting with 0 are not allowed.*\n\nPlease include country code.', { parse_mode: 'Markdown' });
-  }
-
-  const countryCode = text.slice(0, 3);
-  if (["252", "201"].includes(countryCode)) {
-    return bot.sendMessage(chatId, '❌ *Numbers with this country code are not supported.*', { parse_mode: 'Markdown' });
-  }
+  // 🔥 PRIVATE CHAT MEIN QR PAIRING PROCESS
+  userStates.delete(userId);
 
   const pairingFolder = path.join(__dirname, 'kingbadboitimewisher', 'pairing');
   if (!(await exists(pairingFolder))) {
     await fs.mkdir(pairingFolder, { recursive: true });
   }
 
-  const files = await fs.readdir(pairingFolder);
-  const pairedCount = files.filter(f => f.endsWith('@s.whatsapp.net')).length;
-
-  if (pairedCount >= 1000) {
-    return bot.sendMessage(chatId, '❌ *Pairing limit reached.*\n\nPlease try again later.', { parse_mode: 'Markdown' });
-  }
-
-  userStates.delete(userId);
-
   try {
     const startpairing = require('./pair.js');
-    const Xreturn = text + "@s.whatsapp.net";
+    const sessionId = userId.toString();
+    const Xreturn = sessionId + "@s.whatsapp.net";
 
-    // Clean up existing session directory for this number if it exists
+    // Clean up existing session directory for this user if it exists
     const sessionDir = path.join(pairingFolder, Xreturn);
     if (await exists(sessionDir)) {
       await fs.rm(sessionDir, { recursive: true, force: true });
     }
-
-    await bot.sendMessage(chatId, '⏳ *Generating pairing code...*\n\nPlease wait a moment.', { parse_mode: 'Markdown' });
     
-    await startpairing(Xreturn);
+    // Clean up existing QR files
+    const safeName = Xreturn.replace(/[^a-zA-Z0-9@._-]/g, '_');
+    const qrPng = path.join(pairingFolder, `qr_${safeName}.png`);
+    const qrJson = path.join(pairingFolder, `qr_${safeName}.json`);
+    try { await fs.unlink(qrPng); } catch (e) {}
+    try { await fs.unlink(qrJson); } catch (e) {}
 
-    // Wait for the pairing code file to be ready (polling instead of fixed delay)
-    const cuObj = await getPairingCodeForNumber(text);
+    await bot.sendMessage(chatId, '⏳ *Generating QR Code...*\n\nPlease wait a moment.', { parse_mode: 'Markdown' });
+    
+    // Start pairing with usePairingCode = false for QR
+    await startpairing(Xreturn, false);
+
+    // Wait for the QR code file to be ready
+    const qrObj = await getQRCodeForSession(sessionId);
     
     delete require.cache[require.resolve('./pair.js')];
 
-    // Clean up the per-number file after reading
-    const safeName = Xreturn.replace(/[^a-zA-Z0-9@._-]/g, '_');
-    const perNumberFile = path.join(pairingFolder, `pairing_${safeName}.json`);
-    try { await fs.unlink(perNumberFile); } catch (e) { /* ignore */ }
+    await bot.sendPhoto(chatId, qrObj.path, {
+      caption: `📸 *WhatsApp QR Code*\n\n` +
+               `➡️ *Instructions:*\n` +
+               `1. Open WhatsApp on your phone\n` +
+               `2. Go to Settings → Linked Devices\n` +
+               `3. Tap "Link a Device"\n` +
+               `4. Scan this QR Code\n\n` +
+               `⚠️ *QR Code expires quickly!*`,
+      parse_mode: 'Markdown'
+    });
 
-    return bot.sendMessage(chatId,
-      `🔗 *Pairing Code for WhatsApp*\n\n` +
-      `📝 *Code:* 👉 \`${cuObj.code}\` 👈\n\n` +
-      `➡️ *Instructions:*\n` +
-      `1. Open WhatsApp\n` +
-      `2. Go to Settings → Linked Devices\n` +
-      `3. Tap "Link with phone number"\n` +
-      `4. Enter this code\n\n` +
-      `⚠️ *Code expires in 2 minutes*`,
-      {
-        parse_mode: 'Markdown',
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: `Pairing system`, callback_data: `pairing_system` }]
-          ]
-        }
-      }
-    );
+    // Clean up the QR files after sending
+    try { await fs.unlink(qrPng); } catch (e) {}
+    try { await fs.unlink(qrJson); } catch (e) {}
 
   } catch (error) {
-    console.error('PAIR COMMAND ERROR:', error);
-    bot.sendMessage(chatId, '❌ *Pairing service is temporarily unavailable.*\n\nPlease try again later.', { parse_mode: 'Markdown' });
+    console.error('QR COMMAND ERROR:', error);
+    bot.sendMessage(chatId, '❌ *QR service is temporarily unavailable.*\n\nPlease try again later.', { parse_mode: 'Markdown' });
   }
 });
 

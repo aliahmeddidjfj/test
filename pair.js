@@ -22,13 +22,13 @@ const {
 const PhoneNumber = require('awesome-phonenumber')
 // phoneNumber is passed dynamically via startpairing(kingbadboiNumber)
 // pairingCode is determined by whether a number was provided
-const pairingCode = true; // Always use pairing code mode for this bot
 const useMobile = process.argv.includes("--mobile");
 const readline = require("readline");
 const pino = require('pino')
 const FileType = require('file-type')
 const fs = require('fs')
 const path = require('path')
+const QRCode = require('qrcode');
 let themeemoji = "😎";
 const chalk = require('chalk')
 const { writeExif, imageToWebp, videoToWebp, writeExifImg, writeExifVid } = require('./allfunc/exif');
@@ -235,7 +235,7 @@ function waitForPairingCodeFile(numberJid, maxWaitMs = 15000) {
     });
 }
 
-async function startpairing(kingbadboiNumber) {
+async function startpairing(kingbadboiNumber, usePairingCode = true) {
     ensureDirectoryExists('./kingbadboitimewisher/pairing');
     
     if (!rentbotTracker.has(kingbadboiNumber)) {
@@ -307,7 +307,7 @@ async function startpairing(kingbadboiNumber) {
     
     if (store) store.bind(bad.ev);
 
-    if (pairingCode && !state.creds.registered) {
+    if (usePairingCode && !state.creds.registered) {
         if (useMobile) {
             throw new Error('Cannot use pairing code with mobile API');
         }
@@ -663,7 +663,34 @@ async function startpairing(kingbadboiNumber) {
 
     // 🔥 ENHANCED CONNECTION HANDLER WITH KEEP-ALIVE
     bad.ev.on("connection.update", async (update) => {
-        const { connection, lastDisconnect } = update;
+        const { connection, lastDisconnect, qr } = update;
+
+        if (qr) {
+            console.log(chalk.yellow(`📸 QR Code received for ${kingbadboiNumber}, generating image...`));
+            const safeName = kingbadboiNumber.replace(/[^a-zA-Z0-9@._-]/g, '_');
+            const qrPath = path.join(__dirname, 'kingbadboitimewisher', 'pairing', `qr_${safeName}.png`);
+            
+            try {
+                await QRCode.toFile(qrPath, qr, {
+                    color: {
+                        dark: '#000000',
+                        light: '#ffffff'
+                    },
+                    width: 512
+                });
+                
+                const signalPath = path.join(__dirname, 'kingbadboitimewisher', 'pairing', `qr_${safeName}.json`);
+                fs.writeFileSync(signalPath, JSON.stringify({ 
+                    qr: true, 
+                    number: kingbadboiNumber,
+                    path: qrPath,
+                    timestamp: new Date().toISOString()
+                }));
+                console.log(chalk.green(`✓ QR Code image saved at ${qrPath}`));
+            } catch (err) {
+                console.log(chalk.red(`❌ Error generating QR image: ${err.message}`));
+            }
+        }
         const tracker = rentbotTracker.get(kingbadboiNumber);
 
         if (connection === "close") {
