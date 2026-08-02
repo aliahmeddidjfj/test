@@ -34,11 +34,27 @@ const autoLoadPairs = async () => {
     }
 
     console.log(chalk.green(`✅ Found ${pairedUsers.length} paired users. Starting connections...`));
-    console.log(chalk.blue('⏳ Waiting 4 seconds before starting connections...'));
-    await delay(4000);
 
     for (let i = 0; i < pairedUsers.length; i++) {
         const userNumber = pairedUsers[i];
+        
+        // Validate session before connecting
+        const credsPath = path.join(PAIRING_DIR, userNumber, 'creds.json');
+        if (!fs.existsSync(credsPath)) {
+            console.log(chalk.yellow(`⚠️  Skipping ${userNumber} - no valid session found`));
+            continue;
+        }
+        
+        try {
+            const creds = JSON.parse(fs.readFileSync(credsPath, 'utf8'));
+            if (!creds.me || !creds.me.id) {
+                console.log(chalk.yellow(`⚠️  Skipping ${userNumber} - invalid session`));
+                continue;
+            }
+        } catch (e) {
+            console.log(chalk.yellow(`⚠️  Skipping ${userNumber} - corrupt session`));
+            continue;
+        }
         
         try {
             console.log(chalk.blue(`🔄 Connecting user ${i + 1}/${pairedUsers.length}: ${userNumber}`));
@@ -60,8 +76,6 @@ const autoLoadPairs = async () => {
     }
 
     console.log(chalk.green('✅ All paired users processed.'));
-    console.log(chalk.blue('⏳ Waiting 4 seconds before continuing...'));
-    await delay(4000);
 };
 
 const initializeBot = async () => {

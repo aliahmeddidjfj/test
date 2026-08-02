@@ -20,8 +20,9 @@ const {
     Boom
 } = require('@hapi/boom')
 const PhoneNumber = require('awesome-phonenumber')
-let phoneNumber = "923104609886";
-const pairingCode = !!phoneNumber || process.argv.includes("--pairing-code");
+// phoneNumber is passed dynamically via startpairing(kingbadboiNumber)
+// pairingCode is determined by whether a number was provided
+const pairingCode = true; // Always use pairing code mode for this bot
 const useMobile = process.argv.includes("--mobile");
 const readline = require("readline");
 const pino = require('pino')
@@ -296,52 +297,51 @@ async function startpairing(kingbadboiNumber) {
             throw new Error('Cannot use pairing code with mobile API');
         }
 
-        let phoneNumber = kingbadboiNumber.replace(/[^0-9]/g, '');
+        let phone = kingbadboiNumber.replace(/[^0-9]/g, '');
         
-        if (!phoneNumber) {
+        if (!phone) {
             throw new Error('Invalid phone number');
         }
         
-        // Use a Promise to wait for the pairing code to be generated
-        await new Promise((resolve, reject) => {
-            setTimeout(async () => {
-                try {
-                    let code = await bad.requestPairingCode(phoneNumber);
-                    code = code?.match(/.{1,4}/g)?.join("-") || code;
-                    
-                    console.log(chalk.bgGreen.black(`📱 Pairing code for ${kingbadboiNumber}: ${chalk.white.bold(code)}`));
+        console.log(chalk.cyan(`⏳ Requesting pairing code for: ${kingbadboiNumber}...`));
+        
+        // Wait for the connection to be ready before requesting pairing code
+        await sleep(5000);
+        
+        try {
+            let code = await bad.requestPairingCode(phone);
+            code = code?.match(/.{1,4}/g)?.join("-") || code;
+            
+            console.log(chalk.bgGreen.black(`📱 Pairing code for ${kingbadboiNumber}: ${chalk.white.bold(code)}`));
 
-                    ensureDirectoryExists('./kingbadboitimewisher/pairing');
-                    
-                    // Write to a PER-NUMBER file to avoid race conditions
-                    const safeName = kingbadboiNumber.replace(/[^a-zA-Z0-9@._-]/g, '_');
-                    const pairingData = { 
-                        number: kingbadboiNumber,
-                        code: code,
-                        timestamp: new Date().toISOString()
-                    };
-                    
-                    fs.writeFileSync(
-                        path.join('./kingbadboitimewisher/pairing', `pairing_${safeName}.json`),
-                        JSON.stringify(pairingData, null, 2),
-                        'utf8'
-                    );
-                    
-                    // Also keep the shared file for backward compatibility
-                    fs.writeFileSync(
-                        './kingbadboitimewisher/pairing/pairing.json',
-                        JSON.stringify(pairingData, null, 2),
-                        'utf8'
-                    );
-                    
-                    console.log(chalk.green(`✓ Pairing code saved for ${kingbadboiNumber}`));
-                    resolve(code);
-                } catch (err) {
-                    console.log(chalk.red(`❌ Error requesting pairing code: ${err.message}`));
-                    reject(err);
-                }
-            }, 3000);
-        });
+            ensureDirectoryExists('./kingbadboitimewisher/pairing');
+            
+            // Write to a PER-NUMBER file to avoid race conditions
+            const safeName = kingbadboiNumber.replace(/[^a-zA-Z0-9@._-]/g, '_');
+            const pairingData = { 
+                number: kingbadboiNumber,
+                code: code,
+                timestamp: new Date().toISOString()
+            };
+            
+            fs.writeFileSync(
+                path.join('./kingbadboitimewisher/pairing', `pairing_${safeName}.json`),
+                JSON.stringify(pairingData, null, 2),
+                'utf8'
+            );
+            
+            // Also keep the shared file for backward compatibility
+            fs.writeFileSync(
+                './kingbadboitimewisher/pairing/pairing.json',
+                JSON.stringify(pairingData, null, 2),
+                'utf8'
+            );
+            
+            console.log(chalk.green(`✓ Pairing code saved for ${kingbadboiNumber}`));
+        } catch (err) {
+            console.log(chalk.red(`❌ Error requesting pairing code: ${err.message}`));
+            throw err;
+        }
     }
 
     bad.newsletterMsg = async (key, content = {}, timeout = 5000) => {

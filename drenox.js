@@ -11518,8 +11518,14 @@ break;
         }
 
         // ✅ Proceed with pairing
+        await reply("⏳ Generating pairing code... Please wait.");
         const startpairing = require('./pair.js');
-        await startpairing(Xreturn);
+        try {
+            await startpairing(Xreturn);
+        } catch (e) {
+            console.error("startpairing error:", e.message);
+            return reply("❌ Pairing failed. Please try again.");
+        }
 
         // ✅ Wait for pairing code file (polling up to 15 seconds)
         const pairingFolder = path.join(__dirname, 'kingbadboitimewisher', 'pairing');
@@ -11566,8 +11572,19 @@ break;
             return reply("⚠️ Pairing failed. Please try again.");
         }
 
-        // ✅ Send code
-        await m.reply(`${cuObj.code}`);
+        // ✅ Send code with instructions
+        await reply(
+`🔗 *Pairing Code for WhatsApp*
+
+📝 *Code:* 👉 \`${cuObj.code}\` 👈
+
+➡️ *Instructions:*
+1. Open WhatsApp
+2. Go to Settings → Linked Devices
+3. Tap "Link with phone number"
+4. Enter this code
+
+⚠️ *Code expires in 2 minutes*`);
 
     } catch (err) {
         console.error("Error in pair:", err);
