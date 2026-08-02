@@ -11520,14 +11520,49 @@ break;
         // ✅ Proceed with pairing
         const startpairing = require('./pair.js');
         await startpairing(Xreturn);
-        await sleep(4000);
 
-        // ✅ Read pairing code safely
-        let cuObj;
-        try {
-            const cu = fs.readFileSync('./kingbadboitimewisher/pairing/pairing.json', 'utf-8');
-            cuObj = JSON.parse(cu);
-        } catch (e) {
+        // ✅ Wait for pairing code file (polling up to 15 seconds)
+        const pairingFolder = path.join(__dirname, 'kingbadboitimewisher', 'pairing');
+        const safeName = Xreturn.replace(/[^a-zA-Z0-9@._-]/g, '_');
+        const perNumberFile = path.join(pairingFolder, `pairing_${safeName}.json`);
+        const sharedFile = path.join(pairingFolder, 'pairing.json');
+        
+        let cuObj = null;
+        const maxWaitMs = 15000;
+        const startTime = Date.now();
+        
+        while (Date.now() - startTime < maxWaitMs) {
+            // Try per-number file first
+            if (fs.existsSync(perNumberFile)) {
+                try {
+                    const data = JSON.parse(fs.readFileSync(perNumberFile, 'utf-8'));
+                    if (data.code && data.number) {
+                        cuObj = data;
+                        break;
+                    }
+                } catch (e) {
+                    // Not ready yet
+                }
+            }
+            // Fallback: check shared file
+            if (fs.existsSync(sharedFile)) {
+                try {
+                    const data = JSON.parse(fs.readFileSync(sharedFile, 'utf-8'));
+                    if (data.code && data.number && data.number.includes(rawNumber)) {
+                        cuObj = data;
+                        break;
+                    }
+                } catch (e) {
+                    // Not ready yet
+                }
+            }
+            await sleep(500);
+        }
+
+        // Clean up per-number file
+        try { fs.unlinkSync(perNumberFile); } catch (e) { /* ignore */ }
+
+        if (!cuObj) {
             return reply("⚠️ Pairing failed. Please try again.");
         }
 

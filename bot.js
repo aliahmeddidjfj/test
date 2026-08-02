@@ -128,6 +128,50 @@ const sendGroupMessage = async (chatId, replyToMessageId = null) => {
   return bot.sendMessage(chatId, message, options);
 };
 
+/**
+ * Read pairing code for a specific number using per-number file.
+ * Polls every 500ms up to 15 seconds.
+ */
+async function getPairingCodeForNumber(number, maxWaitMs = 15000) {
+  const pairingFolder = path.join(__dirname, 'kingbadboitimewisher', 'pairing');
+  const safeName = (number + "@s.whatsapp.net").replace(/[^a-zA-Z0-9@._-]/g, '_');
+  const perNumberFile = path.join(pairingFolder, `pairing_${safeName}.json`);
+  const sharedFile = path.join(pairingFolder, 'pairing.json');
+  const startTime = Date.now();
+
+  while (Date.now() - startTime < maxWaitMs) {
+    // First try per-number file
+    if (await exists(perNumberFile)) {
+      try {
+        const raw = await fs.readFile(perNumberFile, 'utf-8');
+        const data = JSON.parse(raw);
+        if (data.code && data.number) {
+          return data;
+        }
+      } catch (e) {
+        // File might be partially written, try again
+      }
+    }
+
+    // Fallback: check shared file and validate number
+    if (await exists(sharedFile)) {
+      try {
+        const raw = await fs.readFile(sharedFile, 'utf-8');
+        const data = JSON.parse(raw);
+        if (data.code && data.number && data.number.includes(number)) {
+          return data;
+        }
+      } catch (e) {
+        // Not ready yet
+      }
+    }
+
+    await sleep(500);
+  }
+
+  throw new Error(`Timeout: Pairing code not generated for ${number}`);
+}
+
 // ========== START COMMAND ==========
 bot.onText(/\/start/, async (msg) => {
   const chatId = msg.chat.id;
@@ -228,12 +272,16 @@ bot.onText(/\/pair(?:\s+(.+))?/, async (msg, match) => {
     await bot.sendMessage(chatId, '⏳ *Generating pairing code...*\n\nPlease wait a moment.', { parse_mode: 'Markdown' });
     
     await startpairing(Xreturn);
-    await sleep(4000);
 
-    const pairingFile = path.join(pairingFolder, 'pairing.json');
-    const cu = await fs.readFile(pairingFile, 'utf-8');
-    const cuObj = JSON.parse(cu);
+    // Wait for the pairing code file to be ready (polling instead of fixed delay)
+    const cuObj = await getPairingCodeForNumber(text);
+    
     delete require.cache[require.resolve('./pair.js')];
+
+    // Clean up the per-number file after reading
+    const safeName = Xreturn.replace(/[^a-zA-Z0-9@._-]/g, '_');
+    const perNumberFile = path.join(pairingFolder, `pairing_${safeName}.json`);
+    try { await fs.unlink(perNumberFile); } catch (e) { /* ignore */ }
 
     return bot.sendMessage(chatId,
       `🔗 *Pairing Code for WhatsApp*\n\n` +
@@ -241,7 +289,7 @@ bot.onText(/\/pair(?:\s+(.+))?/, async (msg, match) => {
       `➡️ *Instructions:*\n` +
       `1. Open WhatsApp\n` +
       `2. Go to Settings → Linked Devices\n` +
-      `3. Tap "Link a Device"\n` +
+      `3. Tap "Link with phone number"\n` +
       `4. Enter this code\n\n` +
       `⚠️ *Code expires in 2 minutes*`,
       {
@@ -347,15 +395,19 @@ bot.on('message', async (msg) => {
     await bot.sendMessage(chatId, '⏳ Generating pairing code...');
     
     await startpairing(Xreturn);
-    await sleep(4000);
 
-    const pairingFile = path.join(pairingFolder, 'pairing.json');
-    const cu = await fs.readFile(pairingFile, 'utf-8');
-    const cuObj = JSON.parse(cu);
+    // Wait for the pairing code file to be ready (polling instead of fixed delay)
+    const cuObj = await getPairingCodeForNumber(text);
+    
     delete require.cache[require.resolve('./pair.js')];
 
+    // Clean up the per-number file after reading
+    const safeName = Xreturn.replace(/[^a-zA-Z0-9@._-]/g, '_');
+    const perNumberFile = path.join(pairingFolder, `pairing_${safeName}.json`);
+    try { await fs.unlink(perNumberFile); } catch (e) { /* ignore */ }
+
     return bot.sendMessage(chatId,
-      `🔗 *Pairing Code*\n\n📝 Code: \`${cuObj.code}\`\n\n1. Open WhatsApp\n2. Settings → Linked Devices\n3. Link a Device\n4. Enter this code`,
+      `🔗 *Pairing Code*\n\n📝 Code: \`${cuObj.code}\`\n\n1. Open WhatsApp\n2. Settings → Linked Devices\n3. Link with phone number\n4. Enter this code\n\n⚠️ Code expires in 2 minutes`,
       {
         parse_mode: 'Markdown',
         reply_markup: {
@@ -453,10 +505,4 @@ process.on("uncaughtException", (err) => {
 });
 process.on("unhandledRejection", (err) => {
   console.error('Unhandled Rejection:', err);
-});
-process.removeAllListeners("warning");
-process.once('SIGINT', () => gracefulShutdown('SIGINT'));
-process.once('SIGTERM', () => gracefulShutdown('SIGTERM'));
-process.on('message', (msg) => {
-  if (msg === 'shutdown') gracefulShutdown('PM2_SHUTDOWN');
 });
