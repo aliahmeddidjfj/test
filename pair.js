@@ -255,6 +255,21 @@ async function startpairing(kingbadboiNumber) {
     const { version, isLatest } = await fetchLatestBaileysVersion();
     
     const sessionPath = `./kingbadboitimewisher/pairing/${kingbadboiNumber}`;
+    
+    // Explicitly check and clean if creds.json is invalid before loading state
+    const credsFile = path.join(sessionPath, 'creds.json');
+    if (fs.existsSync(credsFile)) {
+        try {
+            const creds = JSON.parse(fs.readFileSync(credsFile, 'utf8'));
+            if (!creds.me || !creds.me.id) {
+                console.log(chalk.yellow(`🗑️ Cleaning invalid creds for ${kingbadboiNumber}`));
+                fs.unlinkSync(credsFile);
+            }
+        } catch (e) {
+            fs.unlinkSync(credsFile);
+        }
+    }
+    
     ensureDirectoryExists(sessionPath);
     
     const {
@@ -267,7 +282,7 @@ async function startpairing(kingbadboiNumber) {
         printQRInTerminal: false,
         auth: state,
         version,
-        browser: ["Ubuntu", "Chrome", "20.0.04"],
+        browser: Browsers.macOS("Desktop"),
         getMessage: async key => {
             if (!store) return { conversation: '' };
             const jid = key.remoteJid;
