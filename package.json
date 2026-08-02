@@ -7,7 +7,8 @@
     "start": "node index.js",
     "dev": "nodemon index.js",
     "bot": "node bot.js",
-    "test": "node --check index.js"
+    "test": "node --check index.js",
+    "postinstall": "pip3 install yt-dlp 2>/dev/null || pip install yt-dlp 2>/dev/null || echo 'yt-dlp install skipped'"
   },
   "keywords": [
     "whiskeysockets",
