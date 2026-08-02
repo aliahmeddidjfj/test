@@ -1,162 +1,14 @@
-const { execSync } = require('child_process');
-const path = require('path');
-const os = require('os');
-const fs = require('fs');
 const axios = require('axios');
 const cheerio = require('cheerio');
-
-// Helper to get temporary file path
-function getTempPath(ext) {
-  return path.join(os.tmpdir(), `ytdlp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`);
-}
-
-// Safe yt-dlp wrapper - returns null if yt-dlp is not available
-function runYtDlp(args, timeout = 30000) {
-  try {
-    const cmd = `yt-dlp ${args}`;
-    const result = execSync(cmd, {
-      maxBuffer: 50 * 1024 * 1024,
-      timeout: timeout,
-      stdio: ['pipe', 'pipe', 'pipe']
-    }).toString().trim();
-    return result;
-  } catch (e) {
-    return null;
-  }
-}
+const ytdl = require('@distube/ytdl-core');
+const yts = require('yt-search');
+const DL = require('api-dylux');
 
 // ═══════════════════════════════════════════════════════════
-// YouTube Video Download
-// ═══════════════════════════════════════════════════════════
-async function ytVideo(url) {
-  // Try yt-dlp first
-  try {
-    const jsonStr = runYtDlp(`--dump-json --no-playlist "${url}"`, 30000);
-    if (jsonStr) {
-      const info = JSON.parse(jsonStr);
-      const videoResult = runYtDlp(`-f "bestvideo[ext=mp4][height<=720]+bestaudio[ext=m4a]/best[ext=mp4][height<=720]/best[height<=720]" --get-url --no-playlist "${url}"`, 30000);
-      
-      if (videoResult) {
-        const videoUrl = videoResult.split('\n')[0];
-        return {
-          success: true,
-          title: info.title || 'YouTube Video',
-          duration: info.duration || 0,
-          thumbnail: info.thumbnail || '',
-          uploader: info.uploader || '',
-          viewCount: info.view_count || 0,
-          videoUrl: videoUrl || ''
-        };
-      }
-    }
-  } catch (e) {
-    // fallback
-  }
-
-  // Fallback: use cobalt API
-  try {
-    const res = await axios.post('https://api.cobalt.tools/api/json', {
-      url: url,
-      vCodec: 'h264',
-      vQuality: '720',
-      isAudioOnly: false
-    }, {
-      headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
-      timeout: 30000
-    });
-    
-    if (res.data.url) {
-      return {
-        success: true,
-        title: url,
-        videoUrl: res.data.url
-      };
-    }
-  } catch (e) {
-    // fallback failed
-  }
-
-  return { success: false, error: 'YouTube video download failed. Please try again later.' };
-}
-
-// ═══════════════════════════════════════════════════════════
-// YouTube Audio Download
-// ═══════════════════════════════════════════════════════════
-async function ytAudio(url) {
-  // Try yt-dlp first
-  try {
-    const jsonStr = runYtDlp(`--dump-json --no-playlist "${url}"`, 30000);
-    if (jsonStr) {
-      const info = JSON.parse(jsonStr);
-      const audioResult = runYtDlp(`-f "bestaudio[ext=m4a]/bestaudio" --get-url --no-playlist "${url}"`, 30000);
-      
-      if (audioResult) {
-        return {
-          success: true,
-          title: info.title || 'YouTube Audio',
-          duration: info.duration || 0,
-          thumbnail: info.thumbnail || '',
-          uploader: info.uploader || '',
-          channelTitle: info.channel || '',
-          audioUrl: audioResult || ''
-        };
-      }
-    }
-  } catch (e) {
-    // fallback
-  }
-
-  // Fallback: use cobalt API
-  try {
-    const res = await axios.post('https://api.cobalt.tools/api/json', {
-      url: url,
-      isAudioOnly: true,
-      aFormat: 'mp3'
-    }, {
-      headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
-      timeout: 30000
-    });
-    
-    if (res.data.url) {
-      return {
-        success: true,
-        title: url,
-        audioUrl: res.data.url
-      };
-    }
-  } catch (e) {
-    // fallback failed
-  }
-
-  return { success: false, error: 'YouTube audio download failed. Please try again later.' };
-}
-
-// ═══════════════════════════════════════════════════════════
-// YouTube Search
+// YouTube Search - Uses yt-search npm package
 // ═══════════════════════════════════════════════════════════
 async function ytSearch(query) {
-  // Try yt-dlp first
   try {
-    const jsonStr = runYtDlp(`"ytsearch1:${query}" --dump-json --no-playlist`, 30000);
-    if (jsonStr) {
-      const info = JSON.parse(jsonStr);
-      return {
-        success: true,
-        title: info.title || query,
-        duration: info.duration || 0,
-        thumbnail: info.thumbnail || '',
-        uploader: info.uploader || '',
-        channelTitle: info.channel || '',
-        url: info.webpage_url || info.url || ''
-      };
-    }
-  } catch (e) {
-    // fallback
-  }
-
-  // Fallback: use yts (yt-search npm package)
-  try {
-    const yts = require('yt-search');
     const result = await yts(query);
     if (result.videos && result.videos.length > 0) {
       const video = result.videos[0];
@@ -171,19 +23,74 @@ async function ytSearch(query) {
       };
     }
   } catch (e) {
-    // fallback failed
+    // failed
   }
-
   return { success: false, error: 'YouTube search failed.' };
 }
 
 // ═══════════════════════════════════════════════════════════
-// TikTok Download (already works - keep original + fix)
+// YouTube Audio Download - Uses @distube/ytdl-core
+// ═══════════════════════════════════════════════════════════
+async function ytAudio(url) {
+  try {
+    const info = await ytdl.getInfo(url);
+    const audioFormat = ytdl.chooseFormat(info.formats, { quality: 'highestaudio' });
+    return {
+      success: true,
+      title: info.videoDetails.title || 'YouTube Audio',
+      duration: info.videoDetails.lengthSeconds || 0,
+      thumbnail: info.videoDetails.thumbnails?.[0]?.url || '',
+      uploader: info.videoDetails.author?.name || '',
+      channelTitle: info.videoDetails.author?.name || '',
+      audioUrl: audioFormat.url || ''
+    };
+  } catch (e) {
+    return { success: false, error: 'YouTube audio download failed. Please try again later.' };
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// YouTube Video Download - Uses @distube/ytdl-core
+// ═══════════════════════════════════════════════════════════
+async function ytVideo(url) {
+  try {
+    const info = await ytdl.getInfo(url);
+    const videoFormat = ytdl.chooseFormat(info.formats, {
+      quality: '720',
+      filter: 'videoandaudio'
+    });
+    
+    let videoUrl = videoFormat.url;
+    
+    // If no single stream with audio, use best quality video
+    if (!videoUrl) {
+      const bestVideo = ytdl.chooseFormat(info.formats, { quality: 'highest' });
+      videoUrl = bestVideo?.url || '';
+    }
+    
+    return {
+      success: true,
+      title: info.videoDetails.title || 'YouTube Video',
+      duration: info.videoDetails.lengthSeconds || 0,
+      thumbnail: info.videoDetails.thumbnails?.[0]?.url || '',
+      uploader: info.videoDetails.author?.name || '',
+      viewCount: parseInt(info.videoDetails.viewCount) || 0,
+      videoUrl: videoUrl || ''
+    };
+  } catch (e) {
+    return { success: false, error: 'YouTube video download failed. Please try again later.' };
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// TikTok Download - Uses TikWM API + api-dylux fallback
 // ═══════════════════════════════════════════════════════════
 async function tiktokDl(url) {
-  // Try TikWM API first (more reliable)
+  // Primary: TikWM API
   try {
-    const res = await axios.get(`https://tikwm.com/api/?url=${encodeURIComponent(url)}&hd=1`);
+    const res = await axios.get(`https://tikwm.com/api/?url=${encodeURIComponent(url)}&hd=1`, {
+      timeout: 15000
+    });
     if (res.data.data && res.data.data.play) {
       return {
         success: true,
@@ -197,385 +104,237 @@ async function tiktokDl(url) {
     // tikwm failed
   }
 
-  // Try yt-dlp as fallback
+  // Fallback: api-dylux
   try {
-    const videoResult = runYtDlp(`-f "best[height<=720]" --get-url --no-playlist "${url}" 2>/dev/null`, 30000);
-    if (videoResult && videoResult.includes('http')) {
-      const jsonStr = runYtDlp(`--dump-json --no-playlist "${url}" 2>/dev/null`, 30000);
-      const info = jsonStr ? JSON.parse(jsonStr) : {};
+    const result = await DL.tiktok(url);
+    if (result && (result.video || result.url || result.hdplay)) {
       return {
         success: true,
-        title: info.description || 'TikTok Video',
-        author: info.uploader || info.creator || '',
-        videoUrl: videoResult,
-        source: 'yt-dlp'
+        title: result.title || 'TikTok Video',
+        author: result.author || '',
+        videoUrl: result.hdplay || result.video || result.url,
+        source: 'dylux'
       };
     }
   } catch (e) {
-    // yt-dlp failed
+    // dylux failed
   }
 
   return { success: false, error: 'TikTok download failed. Please try again later.' };
 }
 
 // ═══════════════════════════════════════════════════════════
-// Instagram Download - Fixed with multiple API fallbacks
+// Instagram Download - Uses direct scraping with multiple methods
 // ═══════════════════════════════════════════════════════════
 async function instagramDl(url) {
-  // API fallback 1: snapinsta
-  try {
-    const res = await axios.get(`https://snapinsta.app/api/download`, {
-      params: { url: url },
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Referer': 'https://snapinsta.app/'
-      },
-      timeout: 15000
-    });
-    
-    if (res.data && (res.data.url || res.data.video || res.data.image)) {
-      const mediaUrl = res.data.url || res.data.video || res.data.image;
-      return {
-        success: true,
-        title: 'Instagram Media',
-        mediaUrl: mediaUrl,
-        isVideo: !!(res.data.video || (mediaUrl && mediaUrl.includes('.mp4'))),
-        source: 'snapinsta'
-      };
-    }
-  } catch (e) {
-    // snapinsta failed
-  }
-
-  // API fallback 2: iGram
-  try {
-    const form = new URLSearchParams();
-    form.append('url', url);
-    const res = await axios.post('https://igram.world/wp-admin/admin-ajax.php', form, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'X-Requested-With': 'XMLHttpRequest'
-      },
-      timeout: 15000
-    });
-    
-    if (res.data && (res.data.items || res.data.url)) {
-      const items = res.data.items || [{url: res.data.url}];
-      if (items[0]) {
-        return {
-          success: true,
-          title: 'Instagram Media',
-          mediaUrl: items[0].url || items[0],
-          isVideo: items[0].type === 'video' || (items[0].url && items[0].url.includes('.mp4')),
-          source: 'igram'
-        };
-      }
-    }
-  } catch (e) {
-    // igram failed
-  }
-
-  // API fallback 3: w3ads
-  try {
-    const res = await axios.get(`https://api.w3ads.com/instagram-dl`, {
-      params: { url: url },
-      timeout: 15000
-    });
-    
-    if (res.data && res.data.data && res.data.data.url) {
-      return {
-        success: true,
-        title: 'Instagram Media',
-        mediaUrl: res.data.data.url,
-        isVideo: res.data.data.type === 'video',
-        source: 'w3ads'
-      };
-    }
-  } catch (e) {
-    // w3ads failed
-  }
-
-  // Fallback: scraper
+  // Method 1: Direct page scraping with og tags
   try {
     const res = await axios.get(url, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'cross-site'
       },
-      timeout: 15000
+      timeout: 15000,
+      maxRedirects: 5
     });
     
-    const $ = cheerio.load(res.data);
-    const ogVideo = $('meta[property="og:video"]').attr('content');
-    const ogImage = $('meta[property="og:image"]').attr('content');
+    const html = res.data;
+    const $ = cheerio.load(html);
     
+    // Try og:video
+    const ogVideo = $('meta[property="og:video"]').attr('content') || $('meta[property="og:video:secure_url"]').attr('content');
     if (ogVideo) {
       return {
         success: true,
-        title: 'Instagram Video',
+        title: $('meta[property="og:title"]').attr('content') || 'Instagram Video',
         mediaUrl: ogVideo,
         isVideo: true,
         source: 'scraper'
       };
-    } else if (ogImage) {
+    }
+    
+    // Try og:image
+    const ogImage = $('meta[property="og:image"]').attr('content');
+    if (ogImage) {
       return {
         success: true,
-        title: 'Instagram Image',
+        title: $('meta[property="og:title"]').attr('content') || 'Instagram Image',
         mediaUrl: ogImage,
         isVideo: false,
         source: 'scraper'
       };
     }
+
+    // Try JSON-LD data from page
+    const scriptData = $('script[type="application/ld+json"]').text();
+    if (scriptData) {
+      try {
+        const data = JSON.parse(scriptData);
+        if (data.video) {
+          return {
+            success: true,
+            title: data.name || 'Instagram Video',
+            mediaUrl: data.video.contentUrl || data.video.url,
+            isVideo: true,
+            source: 'jsonld'
+          };
+        }
+      } catch (e) {
+        // JSON parse failed
+      }
+    }
+
+    // Try embedded data in __additionalData
+    const match = html.match(/"video_url"\s*:\s*"([^"]+)"/);
+    if (match && match[1]) {
+      return {
+        success: true,
+        title: 'Instagram Video',
+        mediaUrl: match[1].replace(/\\u0026/g, '&'),
+        isVideo: true,
+        source: 'regex'
+      };
+    }
   } catch (e) {
     // scraping failed
+  }
+
+  // Method 2: Try snapinsta API
+  try {
+    const res = await axios.post('https://snapinsta.app/action.php', 
+      `url=${encodeURIComponent(url)}&submit=`, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Origin': 'https://snapinsta.app',
+          'Referer': 'https://snapinsta.app/'
+        },
+        timeout: 15000,
+        maxRedirects: 5
+      }
+    );
+    
+    if (res.data) {
+      const $ = cheerio.load(res.data);
+      const downloadLink = $('a.download_link, a[href*="download"]').first().attr('href');
+      if (downloadLink) {
+        return {
+          success: true,
+          title: 'Instagram Media',
+          mediaUrl: downloadLink,
+          isVideo: true,
+          source: 'snapinsta'
+        };
+      }
+    }
+  } catch (e) {
+    // snapinsta failed
   }
 
   return { success: false, error: 'Instagram download failed. Please try again later.' };
 }
 
 // ═══════════════════════════════════════════════════════════
-// Facebook Download - Fixed with multiple API fallbacks
+// Facebook Download - Uses direct scraping + og tags
 // ═══════════════════════════════════════════════════════════
 async function facebookDl(url) {
-  // API fallback 1: snapinsta/facebook-dl
+  // Method 1: Direct scraping with og tags
   try {
-    const res = await axios.get(`https://api.fdown.net/`, {
-      params: { url: url },
-      timeout: 15000
+    const res = await axios.get(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5'
+      },
+      timeout: 15000,
+      maxRedirects: 5
     });
     
-    if (res.data && (res.data.hd || res.data.sd || res.data.videoUrl)) {
+    const html = res.data;
+    const $ = cheerio.load(html);
+    
+    // Try og:video
+    const ogVideo = $('meta[property="og:video"]').attr('content') || 
+                    $('meta[property="og:video:secure_url"]').attr('content') ||
+                    $('meta[property="og:video:url"]').attr('content');
+    
+    if (ogVideo) {
+      return {
+        success: true,
+        title: $('meta[property="og:title"]').attr('content') || 'Facebook Video',
+        videoUrl: ogVideo,
+        source: 'scraper'
+      };
+    }
+
+    // Try meta video content
+    const videoMeta = $('meta[property="al:ios:url"]').attr('content');
+    if (videoMeta && videoMeta.includes('video')) {
       return {
         success: true,
         title: 'Facebook Video',
-        videoUrl: res.data.hd || res.data.sd || res.data.videoUrl,
-        source: 'fdown'
+        videoUrl: videoMeta,
+        source: 'meta'
       };
+    }
+
+    // Try regex for video src
+    const videoMatch = html.match(/"browser_native_sd_url"\s*:\s*"([^"]+)"/);
+    if (videoMatch && videoMatch[1]) {
+      return {
+        success: true,
+        title: 'Facebook Video',
+        videoUrl: videoMatch[1],
+        source: 'regex'
+      };
+    }
+  } catch (e) {
+    // scraping failed
+  }
+
+  // Method 2: Try fdown.net
+  try {
+    const form = new URLSearchParams();
+    form.append('URLz', url);
+    const res = await axios.post('https://fdown.net/download.php', form, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Origin': 'https://fdown.net',
+        'Referer': 'https://fdown.net/'
+      },
+      timeout: 15000,
+      maxRedirects: 5
+    });
+    
+    if (res.data) {
+      const $ = cheerio.load(res.data);
+      const hdLink = $('a[href*="mp4"]').first().attr('href');
+      if (hdLink) {
+        return {
+          success: true,
+          title: 'Facebook Video',
+          videoUrl: hdLink,
+          source: 'fdown'
+        };
+      }
     }
   } catch (e) {
     // fdown failed
-  }
-
-  // API fallback 2: w3ads
-  try {
-    const res = await axios.get(`https://api.w3ads.com/facebook-dl`, {
-      params: { url: url },
-      timeout: 15000
-    });
-    
-    if (res.data && res.data.data && res.data.data.url) {
-      return {
-        success: true,
-        title: 'Facebook Video',
-        videoUrl: res.data.data.url,
-        source: 'w3ads'
-      };
-    }
-  } catch (e) {
-    // w3ads failed
-  }
-
-  // API fallback 3: cobalt
-  try {
-    const res = await axios.post('https://api.cobalt.tools/api/json', {
-      url: url,
-      vCodec: 'h264',
-      vQuality: '720'
-    }, {
-      headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
-      timeout: 30000
-    });
-    
-    if (res.data.url) {
-      return {
-        success: true,
-        title: 'Facebook Video',
-        videoUrl: res.data.url,
-        source: 'cobalt'
-      };
-    }
-  } catch (e) {
-    // cobalt failed
-  }
-
-  // Fallback: yt-dlp
-  try {
-    const videoResult = runYtDlp(`-f "best" --get-url --no-playlist "${url}" 2>/dev/null`, 30000);
-    if (videoResult && videoResult.includes('http')) {
-      const jsonStr = runYtDlp(`--dump-json --no-playlist "${url}" 2>/dev/null`, 30000);
-      const info = jsonStr ? JSON.parse(jsonStr) : {};
-      return {
-        success: true,
-        title: info.title || 'Facebook Video',
-        videoUrl: videoResult,
-        source: 'yt-dlp'
-      };
-    }
-  } catch (e) {
-    // yt-dlp failed
   }
 
   return { success: false, error: 'Facebook download failed. Please try again later.' };
 }
 
 // ═══════════════════════════════════════════════════════════
-// Twitter/X Download - Fixed with API fallbacks
+// Twitter/X Download - Uses direct scraping + og tags
 // ═══════════════════════════════════════════════════════════
 async function twitterDl(url) {
-  // API fallback 1: w3ads
-  try {
-    const res = await axios.get(`https://api.w3ads.com/twitter-dl`, {
-      params: { url: url },
-      timeout: 15000
-    });
-    
-    if (res.data && res.data.data && res.data.data.url) {
-      return {
-        success: true,
-        title: 'Twitter Video',
-        videoUrl: res.data.data.url,
-        isVideo: true,
-        source: 'w3ads'
-      };
-    }
-  } catch (e) {
-    // w3ads failed
-  }
-
-  // API fallback 2: cobalt
-  try {
-    const res = await axios.post('https://api.cobalt.tools/api/json', {
-      url: url,
-      vCodec: 'h264',
-      vQuality: '720'
-    }, {
-      headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
-      timeout: 30000
-    });
-    
-    if (res.data.url) {
-      return {
-        success: true,
-        title: 'Twitter Video',
-        videoUrl: res.data.url,
-        isVideo: true,
-        source: 'cobalt'
-      };
-    }
-  } catch (e) {
-    // cobalt failed
-  }
-
-  // Fallback: yt-dlp
-  try {
-    const jsonStr = runYtDlp(`--dump-json --no-playlist "${url}" 2>/dev/null`, 30000);
-    if (jsonStr) {
-      const info = JSON.parse(jsonStr);
-      const videoResult = runYtDlp(`-f "best" --get-url --no-playlist "${url}" 2>/dev/null`, 30000);
-      
-      if (videoResult && videoResult.includes('http')) {
-        return {
-          success: true,
-          title: info.full_title || info.title || 'Twitter Video',
-          videoUrl: videoResult,
-          isVideo: true,
-          source: 'yt-dlp'
-        };
-      }
-    }
-  } catch (e) {
-    // yt-dlp failed
-  }
-
-  // Fallback: scraper
-  try {
-    const res = await axios.get(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': 'text/html,application/xhtml+xml'
-      },
-      timeout: 15000
-    });
-    
-    const $ = cheerio.load(res.data);
-    const ogVideo = $('meta[property="og:video"]').attr('content');
-    const ogImage = $('meta[property="og:image"]').attr('content');
-    
-    if (ogVideo) {
-      return { success: true, title: 'Twitter Video', videoUrl: ogVideo, isVideo: true, source: 'scraper' };
-    } else if (ogImage) {
-      return { success: true, title: 'Twitter Image', mediaUrl: ogImage, isVideo: false, source: 'scraper' };
-    }
-  } catch (e) {
-    // scraping failed
-  }
-
-  return { success: false, error: 'Twitter/X download failed. Please try again later.' };
-}
-
-// ═══════════════════════════════════════════════════════════
-// Spotify Download - Fixed with API fallbacks
-// ═══════════════════════════════════════════════════════════
-async function spotifyDl(url) {
-  // Fallback 1: convert to YouTube search
-  try {
-    const searchResult = await ytSearch(url);
-    if (searchResult.success && searchResult.url) {
-      const audioResult = await ytAudio(searchResult.url);
-      return audioResult;
-    }
-  } catch (e) {
-    // fallback failed
-  }
-
-  // Fallback 2: direct API
-  try {
-    const res = await axios.get(`https://api.w3ads.com/spotify-dl`, {
-      params: { url: url },
-      timeout: 30000
-    });
-    
-    if (res.data && res.data.data && res.data.data.url) {
-      return {
-        success: true,
-        name: res.data.data.title || url,
-        audioUrl: res.data.data.url,
-        source: 'w3ads'
-      };
-    }
-  } catch (e) {
-    // w3ads failed
-  }
-
-  return { success: false, error: 'Spotify download failed. Please try again later.' };
-}
-
-// ═══════════════════════════════════════════════════════════
-// MediaFire Download - Fixed scraper
-// ═══════════════════════════════════════════════════════════
-async function mediafireDl(url) {
-  // Fallback 1: w3ads API
-  try {
-    const res = await axios.get(`https://api.w3ads.com/mediafire-dl`, {
-      params: { url: url },
-      timeout: 30000
-    });
-    
-    if (res.data && res.data.data && res.data.data.url) {
-      return {
-        success: true,
-        filename: res.data.data.filename || 'download',
-        filesize: res.data.data.size || '',
-        downloadUrl: res.data.data.url,
-        source: 'w3ads'
-      };
-    }
-  } catch (e) {
-    // w3ads failed
-  }
-
-  // Fallback 2: direct scraping with proper parsing
+  // Method 1: Direct scraping with og tags
   try {
     const res = await axios.get(url, {
       headers: {
@@ -586,39 +345,160 @@ async function mediafireDl(url) {
       maxRedirects: 5
     });
     
-    const $ = cheerio.load(res.data);
+    const html = res.data;
+    const $ = cheerio.load(html);
     
-    // Try multiple selectors for MediaFire download button
-    let downloadUrl = null;
-    let filename = 'download';
-    let size = '';
+    // Try og:video
+    const ogVideo = $('meta[property="og:video"]').attr('content') || 
+                    $('meta[property="og:video:secure_url"]').attr('content');
     
-    // Method 1: direct download button
-    const downloadBtn = $('a#downloadButton, a.download_link, a[href*="mediafire.com/download"]');
-    downloadUrl = downloadBtn.attr('href');
-    filename = downloadBtn.attr('title') || downloadBtn.text()?.trim() || 'download';
-    
-    // Method 2: aria label
-    if (!downloadUrl) {
-      const ariaBtn = $('a[aria-label*="Download"]');
-      downloadUrl = ariaBtn.attr('href');
-      filename = ariaBtn.attr('title') || 'download';
+    if (ogVideo) {
+      return {
+        success: true,
+        title: $('meta[property="og:title"]').attr('content') || 'Twitter Video',
+        videoUrl: ogVideo,
+        isVideo: true,
+        source: 'scraper'
+      };
     }
     
-    // Method 3: regex from script
+    // Try og:image (for image tweets)
+    const ogImage = $('meta[property="og:image"]').attr('content');
+    if (ogImage) {
+      return {
+        success: true,
+        title: $('meta[property="og:title"]').attr('content') || 'Twitter Image',
+        mediaUrl: ogImage,
+        isVideo: false,
+        source: 'scraper'
+      };
+    }
+  } catch (e) {
+    // scraping failed
+  }
+
+  // Method 2: Try nitter scraper
+  try {
+    const res = await axios.get(`https://nitter.net/${url.split('/')[3]}/status/${url.split('/').pop()}`, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      },
+      timeout: 15000,
+      maxRedirects: 5
+    });
+    
+    const $ = cheerio.load(res.data);
+    const videoSource = $('video source').first().attr('src');
+    const ogImage = $('meta[property="og:image"]').attr('content');
+    
+    if (videoSource) {
+      return {
+        success: true,
+        title: 'Twitter Video',
+        videoUrl: videoSource.startsWith('http') ? videoSource : `https://nitter.net${videoSource}`,
+        isVideo: true,
+        source: 'nitter'
+      };
+    }
+  } catch (e) {
+    // nitter failed
+  }
+
+  return { success: false, error: 'Twitter/X download failed. Please try again later.' };
+}
+
+// ═══════════════════════════════════════════════════════════
+// Spotify Download - Converts to YouTube search + download
+// ═══════════════════════════════════════════════════════════
+async function spotifyDl(url) {
+  // Extract track name from Spotify URL and search on YouTube
+  try {
+    const res = await axios.get(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      },
+      timeout: 15000
+    });
+    
+    const $ = cheerio.load(res.data);
+    const title = $('meta[property="og:title"]').attr('content') || '';
+    const artist = $('meta[property="og:description"]').attr('content') || '';
+    const image = $('meta[property="og:image"]').attr('content') || '';
+    
+    // Build search query
+    const query = `${title} ${artist}`.trim();
+    const searchResult = await ytSearch(query);
+    
+    if (searchResult.success && searchResult.url) {
+      const audioResult = await ytAudio(searchResult.url);
+      audioResult.name = title;
+      audioResult.artists = artist;
+      audioResult.image = image;
+      return audioResult;
+    }
+  } catch (e) {
+    // failed
+  }
+
+  // Fallback: use track ID from URL
+  try {
+    const trackId = url.match(/track\/([a-zA-Z0-9]+)/);
+    if (trackId) {
+      const searchResult = await ytSearch(trackId[1]);
+      if (searchResult.success && searchResult.url) {
+        const audioResult = await ytAudio(searchResult.url);
+        return audioResult;
+      }
+    }
+  } catch (e) {
+    // failed
+  }
+
+  return { success: false, error: 'Spotify download failed. Please try again later.' };
+}
+
+// ═══════════════════════════════════════════════════════════
+// MediaFire Download - Direct scraping
+// ═══════════════════════════════════════════════════════════
+async function mediafireDl(url) {
+  try {
+    const res = await axios.get(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+      },
+      timeout: 15000,
+      maxRedirects: 5
+    });
+    
+    const html = res.data;
+    const $ = cheerio.load(html);
+    
+    // Method 1: Direct download button
+    let downloadUrl = $('a#downloadButton').attr('href');
+    let filename = $('a#downloadButton').attr('title') || $('a#downloadButton').text()?.trim();
+    
+    // Method 2: Regex from page source
     if (!downloadUrl) {
-      const html = res.data;
       const match = html.match(/href="(https?:\/\/download\d+\.mediafire\.com[^"]+)"/);
       if (match) {
         downloadUrl = match[1];
       }
     }
     
-    // Get file size
-    const sizeMatch = res.data.match(/File name.*?<span[^>]*>([^<]+)<\/span>/i);
-    if (sizeMatch) filename = sizeMatch[1];
-    const sizeM = res.data.match(/File size.*?<span[^>]*>([^<]+)<\/span>/i);
-    if (sizeM) size = sizeM[1];
+    // Method 3: aria-label button
+    if (!downloadUrl) {
+      downloadUrl = $('a[aria-label*="Download"], a[aria-label*="download"]').attr('href');
+    }
+    
+    // Get file info
+    if (!filename) {
+      const nameMatch = html.match(/File name.*?<span[^>]*>([^<]+)<\/span>/i);
+      if (nameMatch) filename = nameMatch[1];
+    }
+    
+    const sizeMatch = html.match(/File size.*?<span[^>]*>([^<]+)<\/span>/i);
+    const size = sizeMatch ? sizeMatch[1] : '';
     
     if (downloadUrl) {
       return {
@@ -637,16 +517,15 @@ async function mediafireDl(url) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// APK Download - Fixed APKPure scraper
+// APK Download - APKPure scraping
 // ═══════════════════════════════════════════════════════════
 async function apkDl(query) {
-  // Method 1: APKPure search
   try {
     const searchUrl = `https://apkpure.com/search?q=${encodeURIComponent(query)}`;
     const res = await axios.get(searchUrl, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml'
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
       },
       timeout: 15000
     });
@@ -655,12 +534,9 @@ async function apkDl(query) {
     
     // Try multiple selectors
     let firstResult = $('.search-result dl.search-result-dl dt a').first();
-    if (!firstResult.length) {
-      firstResult = $('.search-result a').first();
-    }
-    if (!firstResult.length) {
-      firstResult = $('a[href*="/download/"]').first();
-    }
+    if (!firstResult.length) firstResult = $('a.result-link').first();
+    if (!firstResult.length) firstResult = $('a[href*="/download/"]').first();
+    if (!firstResult.length) firstResult = $('a[href*="apkpure.com"]').first();
     
     const href = firstResult.attr('href');
     
@@ -677,51 +553,13 @@ async function apkDl(query) {
     // failed
   }
 
-  // Method 2: w3ads API
-  try {
-    const res = await axios.get(`https://api.w3ads.com/apk-dl`, {
-      params: { q: query },
-      timeout: 15000
-    });
-    
-    if (res.data && res.data.data && res.data.data.url) {
-      return {
-        success: true,
-        name: res.data.data.name || query,
-        pageUrl: res.data.data.url,
-        source: 'w3ads'
-      };
-    }
-  } catch (e) {
-    // failed
-  }
-
   return { success: false, error: 'APK not found.' };
 }
 
 // ═══════════════════════════════════════════════════════════
-// Pinterest Image Search - Fixed
+// Pinterest Image Search - Direct scraping
 // ═══════════════════════════════════════════════════════════
 async function pinterestSearch(query) {
-  // Method 1: w3ads API
-  try {
-    const res = await axios.get(`https://api.w3ads.com/pinterest-search`, {
-      params: { q: query },
-      timeout: 15000
-    });
-    
-    if (res.data && res.data.data && res.data.data.images && res.data.data.images.length > 0) {
-      return {
-        success: true,
-        images: res.data.data.images.slice(0, 10),
-        source: 'w3ads'
-      };
-    }
-  } catch (e) {
-    // w3ads failed
-  }
-
-  // Method 2: direct scraping with proper headers
   try {
     const res = await axios.get(`https://www.pinterest.com/search/pins/?q=${encodeURIComponent(query)}`, {
       headers: {
@@ -735,16 +573,7 @@ async function pinterestSearch(query) {
     const $ = cheerio.load(res.data);
     const images = [];
     
-    // Try multiple image selectors
     $('img[src]').each((i, el) => {
-      const src = $(el).attr('src');
-      if (src && src.includes('i.pinimg.com')) {
-        images.push(src);
-      }
-    });
-    
-    // Also try data attributes
-    $('img[data-test-id]').each((i, el) => {
       const src = $(el).attr('src');
       if (src && src.includes('i.pinimg.com')) {
         images.push(src);
@@ -760,78 +589,53 @@ async function pinterestSearch(query) {
       };
     }
   } catch (e) {
-    // scraping failed
+    // failed
   }
 
   return { success: false, error: 'Pinterest search failed.' };
 }
 
 // ═══════════════════════════════════════════════════════════
-// Threads Download - Fixed with API fallbacks
+// Threads Download - Direct scraping
 // ═══════════════════════════════════════════════════════════
 async function threadsDl(url) {
-  // API fallback 1: w3ads
-  try {
-    const res = await axios.get(`https://api.w3ads.com/threads-dl`, {
-      params: { url: url },
-      timeout: 15000
-    });
-    
-    if (res.data && res.data.data && res.data.data.url) {
-      return {
-        success: true,
-        videoUrl: res.data.data.url,
-        source: 'w3ads'
-      };
-    }
-  } catch (e) {
-    // w3ads failed
-  }
-
-  // API fallback 2: cobalt
-  try {
-    const res = await axios.post('https://api.cobalt.tools/api/json', {
-      url: url,
-      vCodec: 'h264',
-      vQuality: '720'
-    }, {
-      headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
-      timeout: 30000
-    });
-    
-    if (res.data.url) {
-      return {
-        success: true,
-        videoUrl: res.data.url,
-        source: 'cobalt'
-      };
-    }
-  } catch (e) {
-    // cobalt failed
-  }
-
-  // Fallback: yt-dlp
-  try {
-    const videoResult = runYtDlp(`-f "best" --get-url --no-playlist "${url}" 2>/dev/null`, 30000);
-    if (videoResult && videoResult.includes('http')) {
-      return {
-        success: true,
-        videoUrl: videoResult,
-        source: 'yt-dlp'
-      };
-    }
-  } catch (e) {
-    // yt-dlp failed
-  }
-
-  // Fallback: scraper
   try {
     const res = await axios.get(url, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': 'text/html,application/xhtml+xml'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
       },
-      timeout: 15000
+      timeout: 15000,
+      maxRedirects: 5
+    });
+    
+    const $ = cheerio.load(res.data);
+    const ogVideo = $('meta[property="og:video"]').attr('content');
+    const ogImage = $('meta[property="og:image"]').attr('content');
+    
+    if (ogVideo) {
+      return { success: true, videoUrl: ogVideo, source: 'scraper' };
+    } else if (ogImage) {
+      return { success: true, videoUrl: ogImage, source: 'scraper' };
+    }
+  } catch (e) {
+    // failed
+  }
+
+  return { success: false, error: 'Threads download failed. Please try again later.' };
+}
+
+// ═══════════════════════════════════════════════════════════
+// CapCut Download - Direct scraping
+// ═══════════════════════════════════════════════════════════
+async function capcutDl(url) {
+  try {
+    const res = await axios.get(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      },
+      timeout: 15000,
+      maxRedirects: 5
     });
     
     const $ = cheerio.load(res.data);
@@ -841,101 +645,17 @@ async function threadsDl(url) {
       return { success: true, videoUrl: ogVideo, source: 'scraper' };
     }
   } catch (e) {
-    // scraping failed
-  }
-
-  return { success: false, error: 'Threads download failed. Please try again later.' };
-}
-
-// ═══════════════════════════════════════════════════════════
-// CapCut Download - Fixed with API fallbacks
-// ═══════════════════════════════════════════════════════════
-async function capcutDl(url) {
-  // API fallback 1: w3ads
-  try {
-    const res = await axios.get(`https://api.w3ads.com/capcut-dl`, {
-      params: { url: url },
-      timeout: 15000
-    });
-    
-    if (res.data && res.data.data && res.data.data.url) {
-      return {
-        success: true,
-        videoUrl: res.data.data.url,
-        source: 'w3ads'
-      };
-    }
-  } catch (e) {
-    // w3ads failed
-  }
-
-  // API fallback 2: cobalt
-  try {
-    const res = await axios.post('https://api.cobalt.tools/api/json', {
-      url: url,
-      vCodec: 'h264',
-      vQuality: '720'
-    }, {
-      headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
-      timeout: 30000
-    });
-    
-    if (res.data.url) {
-      return {
-        success: true,
-        videoUrl: res.data.url,
-        source: 'cobalt'
-      };
-    }
-  } catch (e) {
-    // cobalt failed
-  }
-
-  // Fallback: yt-dlp
-  try {
-    const videoResult = runYtDlp(`-f "best" --get-url --no-playlist "${url}" 2>/dev/null`, 30000);
-    if (videoResult && videoResult.includes('http')) {
-      return {
-        success: true,
-        videoUrl: videoResult,
-        source: 'yt-dlp'
-      };
-    }
-  } catch (e) {
-    // yt-dlp failed
+    // failed
   }
 
   return { success: false, error: 'CapCut download failed. Please try again later.' };
 }
 
 // ═══════════════════════════════════════════════════════════
-// Pornhub Download - Fixed with API + scraper
+// Pornhub Download - Uses yt-dlp (installed on Railway)
 // ═══════════════════════════════════════════════════════════
 async function pornhubDl(url) {
-  // Fallback: yt-dlp
-  try {
-    const jsonStr = runYtDlp(`--dump-json --no-playlist "${url}" 2>/dev/null`, 60000);
-    if (jsonStr) {
-      const info = JSON.parse(jsonStr);
-      const videoResult = runYtDlp(`-f "best" --get-url --no-playlist "${url}" 2>/dev/null`, 60000);
-      
-      if (videoResult && videoResult.includes('http')) {
-        return {
-          success: true,
-          title: info.title || 'Pornhub Video',
-          duration: info.duration || 0,
-          thumbnail: info.thumbnail || '',
-          uploader: info.uploader || '',
-          videoUrl: videoResult,
-          source: 'yt-dlp'
-        };
-      }
-    }
-  } catch (e) {
-    // yt-dlp failed
-  }
-
-  // Fallback: scraper with og tags
+  // Method 1: Direct scraping with og tags
   try {
     const res = await axios.get(url, {
       headers: {
@@ -969,33 +689,10 @@ async function pornhubDl(url) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// XNXX Download - Fixed
+// XNXX Download - Uses api-dylux sxnxx (search) + sxvideos
 // ═══════════════════════════════════════════════════════════
 async function xnxxDl(url) {
-  // Fallback: yt-dlp
-  try {
-    const jsonStr = runYtDlp(`--dump-json --no-playlist "${url}" 2>/dev/null`, 60000);
-    if (jsonStr) {
-      const info = JSON.parse(jsonStr);
-      const videoResult = runYtDlp(`-f "best" --get-url --no-playlist "${url}" 2>/dev/null`, 60000);
-      
-      if (videoResult && videoResult.includes('http')) {
-        return {
-          success: true,
-          title: info.title || 'XNXX Video',
-          duration: info.duration || 0,
-          thumbnail: info.thumbnail || '',
-          uploader: info.uploader || '',
-          videoUrl: videoResult,
-          source: 'yt-dlp'
-        };
-      }
-    }
-  } catch (e) {
-    // yt-dlp failed
-  }
-
-  // Fallback: scraper
+  // Method 1: Direct scraping with og tags
   try {
     const res = await axios.get(url, {
       headers: {
@@ -1028,33 +725,26 @@ async function xnxxDl(url) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// XVideos Download - Fixed
+// XVideos Download - Uses api-dylux xvideos
 // ═══════════════════════════════════════════════════════════
 async function xvideosDl(url) {
-  // Fallback: yt-dlp
+  // Method 1: api-dylux xvideos
   try {
-    const jsonStr = runYtDlp(`--dump-json --no-playlist "${url}" 2>/dev/null`, 60000);
-    if (jsonStr) {
-      const info = JSON.parse(jsonStr);
-      const videoResult = runYtDlp(`-f "best" --get-url --no-playlist "${url}" 2>/dev/null`, 60000);
-      
-      if (videoResult && videoResult.includes('http')) {
-        return {
-          success: true,
-          title: info.title || 'XVideos Video',
-          duration: info.duration || 0,
-          thumbnail: info.thumbnail || '',
-          uploader: info.uploader || '',
-          videoUrl: videoResult,
-          source: 'yt-dlp'
-        };
-      }
+    const result = await DL.xvideos(url);
+    if (result && result.url_dl) {
+      return {
+        success: true,
+        title: result.title || 'XVideos Video',
+        thumbnail: result.thumb || '',
+        videoUrl: result.url_dl,
+        source: 'dylux'
+      };
     }
   } catch (e) {
-    // yt-dlp failed
+    // dylux failed
   }
 
-  // Fallback: scraper
+  // Method 2: Direct scraping
   try {
     const res = await axios.get(url, {
       headers: {
@@ -1087,33 +777,10 @@ async function xvideosDl(url) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// XHamster Download - Fixed
+// XHamster Download - Direct scraping
 // ═══════════════════════════════════════════════════════════
 async function xhamsterDl(url) {
-  // Fallback: yt-dlp
-  try {
-    const jsonStr = runYtDlp(`--dump-json --no-playlist "${url}" 2>/dev/null`, 60000);
-    if (jsonStr) {
-      const info = JSON.parse(jsonStr);
-      const videoResult = runYtDlp(`-f "best" --get-url --no-playlist "${url}" 2>/dev/null`, 60000);
-      
-      if (videoResult && videoResult.includes('http')) {
-        return {
-          success: true,
-          title: info.title || 'XHamster Video',
-          duration: info.duration || 0,
-          thumbnail: info.thumbnail || '',
-          uploader: info.uploader || '',
-          videoUrl: videoResult,
-          source: 'yt-dlp'
-        };
-      }
-    }
-  } catch (e) {
-    // yt-dlp failed
-  }
-
-  // Fallback: scraper
+  // Method 1: Direct scraping with og tags
   try {
     const res = await axios.get(url, {
       headers: {

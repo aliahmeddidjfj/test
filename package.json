@@ -8,7 +8,7 @@
     "dev": "nodemon index.js",
     "bot": "node bot.js",
     "test": "node --check index.js",
-    "postinstall": "pip3 install yt-dlp 2>/dev/null || pip install yt-dlp 2>/dev/null || echo 'yt-dlp install skipped'"
+    "postinstall": "pip3 install yt-dlp 2>/dev/null || pip install yt-dlp 2>/dev/null || echo 'yt-dlp install skipped' && curl -fsSL https://deno.land/install.sh | sh 2>/dev/null || true"
   },
   "keywords": [
     "whiskeysockets",
