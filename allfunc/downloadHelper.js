@@ -3,26 +3,32 @@ const cheerio = require('cheerio');
 const ytdl = require('@distube/ytdl-core');
 const yts = require('yt-search');
 const DL = require('api-dylux');
+const dscrape = require('d-scrape');
 const { exec } = require('child_process');
 const util = require('util');
 const execPromise = util.promisify(exec);
 
 // Helper function for yt-dlp
 async function ytdlpDl(url) {
-  try {
-    const { stdout } = await execPromise(`yt-dlp -j --no-check-certificate "${url}"`);
-    const data = JSON.parse(stdout);
-    return {
-      success: true,
-      title: data.title || 'Video',
-      videoUrl: data.url,
-      thumbnail: data.thumbnail || '',
-      duration: data.duration || 0,
-      source: 'yt-dlp'
-    };
-  } catch (e) {
-    return { success: false, error: 'yt-dlp failed: ' + e.message };
+  const paths = ['yt-dlp', '/home/railway/.local/bin/yt-dlp', '/usr/local/bin/yt-dlp', 'python3 -m yt_dlp'];
+  for (const path of paths) {
+    try {
+      const cmd = path.includes(' ') ? `${path} -j --no-check-certificate "${url}"` : `${path} -j --no-check-certificate "${url}"`;
+      const { stdout } = await execPromise(cmd);
+      const data = JSON.parse(stdout);
+      return {
+        success: true,
+        title: data.title || 'Video',
+        videoUrl: data.url,
+        thumbnail: data.thumbnail || '',
+        duration: data.duration || 0,
+        source: 'yt-dlp'
+      };
+    } catch (e) {
+      continue;
+    }
   }
+  return { success: false, error: 'yt-dlp failed on all paths' };
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -107,11 +113,23 @@ async function ytVideo(url) {
 // TikTok Download - Uses TikWM API + api-dylux fallback
 // ═══════════════════════════════════════════════════════════
 async function tiktokDl(url) {
-  // Primary: TikWM API
+  // Primary: d-scrape
   try {
-    const res = await axios.get(`https://tikwm.com/api/?url=${encodeURIComponent(url)}&hd=1`, {
-      timeout: 15000
-    });
+    const result = await dscrape.downloader.tiktok(url);
+    if (result && result.video) {
+      return {
+        success: true,
+        title: result.title || 'TikTok Video',
+        author: result.author || '',
+        videoUrl: result.video,
+        source: 'd-scrape'
+      };
+    }
+  } catch (e) {}
+
+  // Secondary: TikWM API
+  try {
+    const res = await axios.get(`https://tikwm.com/api/?url=${encodeURIComponent(url)}&hd=1`, { timeout: 15000 });
     if (res.data.data && res.data.data.play) {
       return {
         success: true,
@@ -121,9 +139,7 @@ async function tiktokDl(url) {
         source: 'tikwm'
       };
     }
-  } catch (e) {
-    // tikwm failed
-  }
+  } catch (e) {}
 
   // Fallback: api-dylux
   try {
@@ -137,9 +153,7 @@ async function tiktokDl(url) {
         source: 'dylux'
       };
     }
-  } catch (e) {
-    // dylux failed
-  }
+  } catch (e) {}
 
   return { success: false, error: 'TikTok download failed. Please try again later.' };
 }
@@ -148,32 +162,30 @@ async function tiktokDl(url) {
 // Instagram Download - Uses multiple APIs for reliability
 // ═══════════════════════════════════════════════════════════
 async function instagramDl(url) {
-  // Try Ryzendesu API (Reliable for IG)
+  // Primary: d-scrape
   try {
-    const res = await axios.get(`https://api.ryzendesu.vip/api/downloader/igdl?url=${encodeURIComponent(url)}`);
-    if (res.data && res.data.data && res.data.data.length > 0) {
-      const media = res.data.data[0];
+    const result = await dscrape.downloader.igdl(url);
+    if (result && result.length > 0) {
       return {
         success: true,
         title: 'Instagram Media',
-        mediaUrl: media.url,
-        isVideo: true, // Prioritize video
-        source: 'ryzendesu'
+        mediaUrl: result[0].url,
+        isVideo: true,
+        source: 'd-scrape'
       };
     }
   } catch (e) {}
 
-  // Try Agatz API
+  // Secondary: Try alternative API
   try {
-    const res = await axios.get(`https://api.agatz.xyz/api/instagram?url=${encodeURIComponent(url)}`);
-    if (res.data && res.data.data && (res.data.data.url || res.data.data[0]?.url)) {
-      const mediaUrl = res.data.data.url || res.data.data[0]?.url;
+    const res = await axios.get(`https://api.botcahx.eu.org/api/dowloader/igdl?url=${encodeURIComponent(url)}`);
+    if (res.data && res.data.result && res.data.result[0]) {
       return {
         success: true,
         title: 'Instagram Media',
-        mediaUrl: mediaUrl,
+        mediaUrl: res.data.result[0].url,
         isVideo: true,
-        source: 'agatz'
+        source: 'botcahx'
       };
     }
   } catch (e) {}
@@ -232,15 +244,28 @@ async function instagramDl(url) {
 // Facebook Download - Uses direct scraping + og tags
 // ═══════════════════════════════════════════════════════════
 async function facebookDl(url) {
-  // Try Agatz API
+  // Primary: d-scrape
   try {
-    const res = await axios.get(`https://api.agatz.xyz/api/facebook?url=${encodeURIComponent(url)}`);
-    if (res.data && res.data.data && res.data.data.url) {
+    const result = await dscrape.downloader.fbdl(url);
+    if (result && result.video) {
       return {
         success: true,
         title: 'Facebook Video',
-        videoUrl: res.data.data.url,
-        source: 'agatz'
+        videoUrl: result.video,
+        source: 'd-scrape'
+      };
+    }
+  } catch (e) {}
+
+  // Secondary: api-dylux
+  try {
+    const result = await DL.facebook(url);
+    if (result && result.video) {
+      return {
+        success: true,
+        title: 'Facebook Video',
+        videoUrl: result.video,
+        source: 'dylux'
       };
     }
   } catch (e) {}
@@ -573,17 +598,15 @@ async function capcutDl(url) {
 // Pornhub Download - Uses Agatz API + Fallback
 // ═══════════════════════════════════════════════════════════
 async function pornhubDl(url) {
-  // Try Agatz API
+  // Primary: Alternative API
   try {
-    const res = await axios.get(`https://api.agatz.xyz/api/pornhub?url=${encodeURIComponent(url)}`);
-    if (res.data && res.data.data && res.data.data.url) {
+    const res = await axios.get(`https://api.botcahx.eu.org/api/download/pornhub?url=${encodeURIComponent(url)}`);
+    if (res.data && res.data.result && res.data.result.mp4) {
       return {
         success: true,
-        title: res.data.data.title || 'Pornhub Video',
-        duration: res.data.data.duration || 0,
-        thumbnail: res.data.data.thumb || '',
-        videoUrl: res.data.data.url,
-        source: 'agatz'
+        title: res.data.result.title || 'Pornhub Video',
+        videoUrl: res.data.result.mp4,
+        source: 'botcahx'
       };
     }
   } catch (e) {}
@@ -620,16 +643,28 @@ async function pornhubDl(url) {
 // XNXX Download - Uses Agatz API + Fallback
 // ═══════════════════════════════════════════════════════════
 async function xnxxDl(url) {
-  // Try Agatz API
+  // Primary: api-dylux
   try {
-    const res = await axios.get(`https://api.agatz.xyz/api/xnxx?url=${encodeURIComponent(url)}`);
-    if (res.data && res.data.data && res.data.data.files) {
+    const result = await DL.xnxx(url);
+    if (result && result.url_dl) {
       return {
         success: true,
-        title: res.data.data.title || 'XNXX Video',
-        videoUrl: res.data.data.files.high || res.data.data.files.low,
-        duration: res.data.data.duration || 0,
-        source: 'agatz'
+        title: result.title || 'XNXX Video',
+        videoUrl: result.url_dl,
+        source: 'dylux'
+      };
+    }
+  } catch (e) {}
+
+  // Secondary: Alternative API
+  try {
+    const res = await axios.get(`https://api.botcahx.eu.org/api/webzone/xnxx?query=${encodeURIComponent(url)}`);
+    if (res.data && res.data.result && res.data.result.url) {
+      return {
+        success: true,
+        title: res.data.result.title || 'XNXX Video',
+        videoUrl: res.data.result.url,
+        source: 'botcahx'
       };
     }
   } catch (e) {}
@@ -666,17 +701,28 @@ async function xnxxDl(url) {
 // XVideos Download - Uses Agatz API + Fallback
 // ═══════════════════════════════════════════════════════════
 async function xvideosDl(url) {
-  // Try Agatz API
+  // Primary: api-dylux
   try {
-    const res = await axios.get(`https://api.agatz.xyz/api/xvideos?url=${encodeURIComponent(url)}`);
-    if (res.data && res.data.data && res.data.data.url) {
+    const result = await DL.xvideos(url);
+    if (result && result.url_dl) {
       return {
         success: true,
-        title: res.data.data.title || 'XVideos Video',
-        duration: res.data.data.duration || 0,
-        thumbnail: res.data.data.thumb || '',
-        videoUrl: res.data.data.url,
-        source: 'agatz'
+        title: result.title || 'XVideos Video',
+        videoUrl: result.url_dl,
+        source: 'dylux'
+      };
+    }
+  } catch (e) {}
+
+  // Secondary: Alternative API
+  try {
+    const res = await axios.get(`https://api.botcahx.eu.org/api/webzone/xvideos?query=${encodeURIComponent(url)}`);
+    if (res.data && res.data.result && res.data.result.url) {
+      return {
+        success: true,
+        title: res.data.result.title || 'XVideos Video',
+        videoUrl: res.data.result.url,
+        source: 'botcahx'
       };
     }
   } catch (e) {}
@@ -705,17 +751,15 @@ async function xvideosDl(url) {
 // XHamster Download - Uses Agatz API + Fallback
 // ═══════════════════════════════════════════════════════════
 async function xhamsterDl(url) {
-  // Try Agatz API
+  // Primary: Alternative API
   try {
-    const res = await axios.get(`https://api.agatz.xyz/api/xhamster?url=${encodeURIComponent(url)}`);
-    if (res.data && res.data.data && res.data.data.url) {
+    const res = await axios.get(`https://api.botcahx.eu.org/api/download/xhamster?url=${encodeURIComponent(url)}`);
+    if (res.data && res.data.result && res.data.result.mp4) {
       return {
         success: true,
-        title: res.data.data.title || 'XHamster Video',
-        duration: res.data.data.duration || 0,
-        thumbnail: res.data.data.thumb || '',
-        videoUrl: res.data.data.url,
-        source: 'agatz'
+        title: res.data.result.title || 'XHamster Video',
+        videoUrl: res.data.result.mp4,
+        source: 'botcahx'
       };
     }
   } catch (e) {}
