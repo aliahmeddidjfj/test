@@ -145,10 +145,40 @@ async function tiktokDl(url) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// Instagram Download - Uses direct scraping with multiple methods
+// Instagram Download - Uses multiple APIs for reliability
 // ═══════════════════════════════════════════════════════════
 async function instagramDl(url) {
-  // Try yt-dlp first (Most reliable)
+  // Try Ryzendesu API (Reliable for IG)
+  try {
+    const res = await axios.get(`https://api.ryzendesu.vip/api/downloader/igdl?url=${encodeURIComponent(url)}`);
+    if (res.data && res.data.data && res.data.data.length > 0) {
+      const media = res.data.data[0];
+      return {
+        success: true,
+        title: 'Instagram Media',
+        mediaUrl: media.url,
+        isVideo: true, // Prioritize video
+        source: 'ryzendesu'
+      };
+    }
+  } catch (e) {}
+
+  // Try Agatz API
+  try {
+    const res = await axios.get(`https://api.agatz.xyz/api/instagram?url=${encodeURIComponent(url)}`);
+    if (res.data && res.data.data && (res.data.data.url || res.data.data[0]?.url)) {
+      const mediaUrl = res.data.data.url || res.data.data[0]?.url;
+      return {
+        success: true,
+        title: 'Instagram Media',
+        mediaUrl: mediaUrl,
+        isVideo: true,
+        source: 'agatz'
+      };
+    }
+  } catch (e) {}
+
+  // Try yt-dlp
   const ytResult = await ytdlpDl(url);
   if (ytResult.success && ytResult.videoUrl) return ytResult;
 
@@ -193,72 +223,7 @@ async function instagramDl(url) {
         source: 'scraper'
       };
     }
-
-    // Try JSON-LD data from page
-    const scriptData = $('script[type="application/ld+json"]').text();
-    if (scriptData) {
-      try {
-        const data = JSON.parse(scriptData);
-        if (data.video) {
-          return {
-            success: true,
-            title: data.name || 'Instagram Video',
-            mediaUrl: data.video.contentUrl || data.video.url,
-            isVideo: true,
-            source: 'jsonld'
-          };
-        }
-      } catch (e) {
-        // JSON parse failed
-      }
-    }
-
-    // Try embedded data in __additionalData
-    const match = html.match(/"video_url"\s*:\s*"([^"]+)"/);
-    if (match && match[1]) {
-      return {
-        success: true,
-        title: 'Instagram Video',
-        mediaUrl: match[1].replace(/\\u0026/g, '&'),
-        isVideo: true,
-        source: 'regex'
-      };
-    }
-  } catch (e) {
-    // scraping failed
-  }
-
-  // Method 2: Try snapinsta API
-  try {
-    const res = await axios.post('https://snapinsta.app/action.php', 
-      `url=${encodeURIComponent(url)}&submit=`, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'Origin': 'https://snapinsta.app',
-          'Referer': 'https://snapinsta.app/'
-        },
-        timeout: 15000,
-        maxRedirects: 5
-      }
-    );
-    
-    if (res.data) {
-      const $ = cheerio.load(res.data);
-      const downloadLink = $('a.download_link, a[href*="download"]').first().attr('href');
-      if (downloadLink) {
-        return {
-          success: true,
-          title: 'Instagram Media',
-          mediaUrl: downloadLink,
-          isVideo: true,
-          source: 'snapinsta'
-        };
-      }
-    }
-  } catch (e) {
-    // snapinsta failed
-  }
+  } catch (e) {}
 
   return { success: false, error: 'Instagram download failed. Please try again later.' };
 }
@@ -267,6 +232,19 @@ async function instagramDl(url) {
 // Facebook Download - Uses direct scraping + og tags
 // ═══════════════════════════════════════════════════════════
 async function facebookDl(url) {
+  // Try Agatz API
+  try {
+    const res = await axios.get(`https://api.agatz.xyz/api/facebook?url=${encodeURIComponent(url)}`);
+    if (res.data && res.data.data && res.data.data.url) {
+      return {
+        success: true,
+        title: 'Facebook Video',
+        videoUrl: res.data.data.url,
+        source: 'agatz'
+      };
+    }
+  } catch (e) {}
+
   // Try yt-dlp first
   const ytResult = await ytdlpDl(url);
   if (ytResult.success && ytResult.videoUrl) return ytResult;
@@ -418,7 +396,6 @@ async function twitterDl(url) {
     
     const $ = cheerio.load(res.data);
     const videoSource = $('video source').first().attr('src');
-    const ogImage = $('meta[property="og:image"]').attr('content');
     
     if (videoSource) {
       return {
@@ -440,48 +417,19 @@ async function twitterDl(url) {
 // Spotify Download - Converts to YouTube search + download
 // ═══════════════════════════════════════════════════════════
 async function spotifyDl(url) {
-  // Extract track name from Spotify URL and search on YouTube
   try {
-    const res = await axios.get(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-      },
-      timeout: 15000
-    });
-    
-    const $ = cheerio.load(res.data);
-    const title = $('meta[property="og:title"]').attr('content') || '';
-    const artist = $('meta[property="og:description"]').attr('content') || '';
-    const image = $('meta[property="og:image"]').attr('content') || '';
-    
-    // Build search query
-    const query = `${title} ${artist}`.trim();
-    const searchResult = await ytSearch(query);
-    
-    if (searchResult.success && searchResult.url) {
-      const audioResult = await ytAudio(searchResult.url);
-      audioResult.name = title;
-      audioResult.artists = artist;
-      audioResult.image = image;
-      return audioResult;
+    const res = await axios.get(`https://api.agatz.xyz/api/spotify?url=${encodeURIComponent(url)}`);
+    if (res.data && res.data.data && res.data.data.url) {
+      return {
+        success: true,
+        title: res.data.data.title || 'Spotify Track',
+        audioUrl: res.data.data.url,
+        image: res.data.data.thumbnail || '',
+        artists: res.data.data.artist || '',
+        source: 'agatz'
+      };
     }
-  } catch (e) {
-    // failed
-  }
-
-  // Fallback: use track ID from URL
-  try {
-    const trackId = url.match(/track\/([a-zA-Z0-9]+)/);
-    if (trackId) {
-      const searchResult = await ytSearch(trackId[1]);
-      if (searchResult.success && searchResult.url) {
-        const audioResult = await ytAudio(searchResult.url);
-        return audioResult;
-      }
-    }
-  } catch (e) {
-    // failed
-  }
+  } catch (e) {}
 
   return { success: false, error: 'Spotify download failed. Please try again later.' };
 }
@@ -493,11 +441,9 @@ async function mediafireDl(url) {
   try {
     const res = await axios.get(url, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
       },
-      timeout: 15000,
-      maxRedirects: 5
+      timeout: 15000
     });
     
     const html = res.data;
@@ -507,40 +453,15 @@ async function mediafireDl(url) {
     let downloadUrl = $('a#downloadButton').attr('href');
     let filename = $('a#downloadButton').attr('title') || $('a#downloadButton').text()?.trim();
     
-    // Method 2: Regex from page source
-    if (!downloadUrl) {
-      const match = html.match(/href="(https?:\/\/download\d+\.mediafire\.com[^"]+)"/);
-      if (match) {
-        downloadUrl = match[1];
-      }
-    }
-    
-    // Method 3: aria-label button
-    if (!downloadUrl) {
-      downloadUrl = $('a[aria-label*="Download"], a[aria-label*="download"]').attr('href');
-    }
-    
-    // Get file info
-    if (!filename) {
-      const nameMatch = html.match(/File name.*?<span[^>]*>([^<]+)<\/span>/i);
-      if (nameMatch) filename = nameMatch[1];
-    }
-    
-    const sizeMatch = html.match(/File size.*?<span[^>]*>([^<]+)<\/span>/i);
-    const size = sizeMatch ? sizeMatch[1] : '';
-    
     if (downloadUrl) {
       return {
         success: true,
         filename: filename || 'download',
-        filesize: size || '',
         downloadUrl: downloadUrl,
         source: 'scraper'
       };
     }
-  } catch (e) {
-    // failed
-  }
+  } catch (e) {}
 
   return { success: false, error: 'MediaFire download failed. Please try again later.' };
 }
@@ -553,20 +474,13 @@ async function apkDl(query) {
     const searchUrl = `https://apkpure.com/search?q=${encodeURIComponent(query)}`;
     const res = await axios.get(searchUrl, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
       },
       timeout: 15000
     });
     
     const $ = cheerio.load(res.data);
-    
-    // Try multiple selectors
     let firstResult = $('.search-result dl.search-result-dl dt a').first();
-    if (!firstResult.length) firstResult = $('a.result-link').first();
-    if (!firstResult.length) firstResult = $('a[href*="/download/"]').first();
-    if (!firstResult.length) firstResult = $('a[href*="apkpure.com"]').first();
-    
     const href = firstResult.attr('href');
     
     if (href) {
@@ -578,9 +492,7 @@ async function apkDl(query) {
         source: 'apkpure'
       };
     }
-  } catch (e) {
-    // failed
-  }
+  } catch (e) {}
 
   return { success: false, error: 'APK not found.' };
 }
@@ -592,34 +504,26 @@ async function pinterestSearch(query) {
   try {
     const res = await axios.get(`https://www.pinterest.com/search/pins/?q=${encodeURIComponent(query)}`, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
       },
       timeout: 15000
     });
     
     const $ = cheerio.load(res.data);
     const images = [];
-    
     $('img[src]').each((i, el) => {
       const src = $(el).attr('src');
-      if (src && src.includes('i.pinimg.com')) {
-        images.push(src);
-      }
+      if (src && src.includes('i.pinimg.com')) images.push(src);
     });
     
     if (images.length > 0) {
-      const unique = [...new Set(images)];
       return {
         success: true,
-        images: unique.slice(0, 10),
+        images: [...new Set(images)].slice(0, 10),
         source: 'scraper'
       };
     }
-  } catch (e) {
-    // failed
-  }
+  } catch (e) {}
 
   return { success: false, error: 'Pinterest search failed.' };
 }
@@ -631,8 +535,7 @@ async function threadsDl(url) {
   try {
     const res = await axios.get(url, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
       },
       timeout: 15000,
       maxRedirects: 5
@@ -640,16 +543,8 @@ async function threadsDl(url) {
     
     const $ = cheerio.load(res.data);
     const ogVideo = $('meta[property="og:video"]').attr('content');
-    const ogImage = $('meta[property="og:image"]').attr('content');
-    
-    if (ogVideo) {
-      return { success: true, videoUrl: ogVideo, source: 'scraper' };
-    } else if (ogImage) {
-      return { success: true, videoUrl: ogImage, source: 'scraper' };
-    }
-  } catch (e) {
-    // failed
-  }
+    if (ogVideo) return { success: true, videoUrl: ogVideo, source: 'scraper' };
+  } catch (e) {}
 
   return { success: false, error: 'Threads download failed. Please try again later.' };
 }
@@ -661,30 +556,39 @@ async function capcutDl(url) {
   try {
     const res = await axios.get(url, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
       },
-      timeout: 15000,
-      maxRedirects: 5
+      timeout: 15000
     });
     
     const $ = cheerio.load(res.data);
     const ogVideo = $('meta[property="og:video"]').attr('content');
-    
-    if (ogVideo) {
-      return { success: true, videoUrl: ogVideo, source: 'scraper' };
-    }
-  } catch (e) {
-    // failed
-  }
+    if (ogVideo) return { success: true, videoUrl: ogVideo, source: 'scraper' };
+  } catch (e) {}
 
   return { success: false, error: 'CapCut download failed. Please try again later.' };
 }
 
 // ═══════════════════════════════════════════════════════════
-// Pornhub Download - Uses yt-dlp (installed on Railway)
+// Pornhub Download - Uses Agatz API + Fallback
 // ═══════════════════════════════════════════════════════════
 async function pornhubDl(url) {
-  // Try yt-dlp first
+  // Try Agatz API
+  try {
+    const res = await axios.get(`https://api.agatz.xyz/api/pornhub?url=${encodeURIComponent(url)}`);
+    if (res.data && res.data.data && res.data.data.url) {
+      return {
+        success: true,
+        title: res.data.data.title || 'Pornhub Video',
+        duration: res.data.data.duration || 0,
+        thumbnail: res.data.data.thumb || '',
+        videoUrl: res.data.data.url,
+        source: 'agatz'
+      };
+    }
+  } catch (e) {}
+
+  // Try yt-dlp
   const ytResult = await ytdlpDl(url);
   if (ytResult.success && ytResult.videoUrl) return ytResult;
 
@@ -692,40 +596,45 @@ async function pornhubDl(url) {
   try {
     const res = await axios.get(url, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
       },
       timeout: 20000
     });
     
     const $ = cheerio.load(res.data);
     const ogVideo = $('meta[property="og:video:url"]').attr('content') || $('meta[property="og:video"]').attr('content');
-    const ogTitle = $('meta[property="og:title"]').attr('content');
-    const ogImage = $('meta[property="og:image"]').attr('content');
-    const ogDuration = $('meta[property="video:duration"]').attr('content');
-    
     if (ogVideo) {
       return {
         success: true,
-        title: ogTitle || 'Pornhub Video',
-        duration: parseInt(ogDuration) || 0,
-        thumbnail: ogImage || '',
+        title: $('meta[property="og:title"]').attr('content') || 'Pornhub Video',
         videoUrl: ogVideo,
         source: 'scraper'
       };
     }
-  } catch (e) {
-    // scraping failed
-  }
+  } catch (e) {}
 
   return { success: false, error: 'Pornhub download failed. Please try again later.' };
 }
 
 // ═══════════════════════════════════════════════════════════
-// XNXX Download - Uses api-dylux sxnxx (search) + sxvideos
+// XNXX Download - Uses Agatz API + Fallback
 // ═══════════════════════════════════════════════════════════
 async function xnxxDl(url) {
-  // Try yt-dlp first
+  // Try Agatz API
+  try {
+    const res = await axios.get(`https://api.agatz.xyz/api/xnxx?url=${encodeURIComponent(url)}`);
+    if (res.data && res.data.data && res.data.data.files) {
+      return {
+        success: true,
+        title: res.data.data.title || 'XNXX Video',
+        videoUrl: res.data.data.files.high || res.data.data.files.low,
+        duration: res.data.data.duration || 0,
+        source: 'agatz'
+      };
+    }
+  } catch (e) {}
+
+  // Try yt-dlp
   const ytResult = await ytdlpDl(url);
   if (ytResult.success && ytResult.videoUrl) return ytResult;
 
@@ -733,39 +642,46 @@ async function xnxxDl(url) {
   try {
     const res = await axios.get(url, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
       },
       timeout: 20000
     });
     
     const $ = cheerio.load(res.data);
     const ogVideo = $('meta[property="og:video:url"]').attr('content') || $('meta[property="og:video"]').attr('content');
-    const ogTitle = $('meta[property="og:title"]').attr('content');
-    const ogImage = $('meta[property="og:image"]').attr('content');
-    const ogDuration = $('meta[property="video:duration"]').attr('content');
-    
     if (ogVideo) {
       return {
         success: true,
-        title: ogTitle || 'XNXX Video',
-        duration: parseInt(ogDuration) || 0,
-        thumbnail: ogImage || '',
+        title: $('meta[property="og:title"]').attr('content') || 'XNXX Video',
         videoUrl: ogVideo,
         source: 'scraper'
       };
     }
-  } catch (e) {
-    // scraping failed
-  }
+  } catch (e) {}
 
   return { success: false, error: 'XNXX download failed. Please try again later.' };
 }
 
 // ═══════════════════════════════════════════════════════════
-// XVideos Download - Uses api-dylux xvideos
+// XVideos Download - Uses Agatz API + Fallback
 // ═══════════════════════════════════════════════════════════
 async function xvideosDl(url) {
-  // Try yt-dlp first
+  // Try Agatz API
+  try {
+    const res = await axios.get(`https://api.agatz.xyz/api/xvideos?url=${encodeURIComponent(url)}`);
+    if (res.data && res.data.data && res.data.data.url) {
+      return {
+        success: true,
+        title: res.data.data.title || 'XVideos Video',
+        duration: res.data.data.duration || 0,
+        thumbnail: res.data.data.thumb || '',
+        videoUrl: res.data.data.url,
+        source: 'agatz'
+      };
+    }
+  } catch (e) {}
+
+  // Try yt-dlp
   const ytResult = await ytdlpDl(url);
   if (ytResult.success && ytResult.videoUrl) return ytResult;
 
@@ -776,52 +692,35 @@ async function xvideosDl(url) {
       return {
         success: true,
         title: result.title || 'XVideos Video',
-        thumbnail: result.thumb || '',
         videoUrl: result.url_dl,
         source: 'dylux'
       };
     }
-  } catch (e) {
-    // dylux failed
-  }
-
-  // Method 2: Direct scraping
-  try {
-    const res = await axios.get(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-      },
-      timeout: 20000
-    });
-    
-    const $ = cheerio.load(res.data);
-    const ogVideo = $('meta[property="og:video:url"]').attr('content') || $('meta[property="og:video"]').attr('content');
-    const ogTitle = $('meta[property="og:title"]').attr('content');
-    const ogImage = $('meta[property="og:image"]').attr('content');
-    const ogDuration = $('meta[property="video:duration"]').attr('content');
-    
-    if (ogVideo) {
-      return {
-        success: true,
-        title: ogTitle || 'XVideos Video',
-        duration: parseInt(ogDuration) || 0,
-        thumbnail: ogImage || '',
-        videoUrl: ogVideo,
-        source: 'scraper'
-      };
-    }
-  } catch (e) {
-    // scraping failed
-  }
+  } catch (e) {}
 
   return { success: false, error: 'XVideos download failed. Please try again later.' };
 }
 
 // ═══════════════════════════════════════════════════════════
-// XHamster Download - Direct scraping
+// XHamster Download - Uses Agatz API + Fallback
 // ═══════════════════════════════════════════════════════════
 async function xhamsterDl(url) {
-  // Try yt-dlp first
+  // Try Agatz API
+  try {
+    const res = await axios.get(`https://api.agatz.xyz/api/xhamster?url=${encodeURIComponent(url)}`);
+    if (res.data && res.data.data && res.data.data.url) {
+      return {
+        success: true,
+        title: res.data.data.title || 'XHamster Video',
+        duration: res.data.data.duration || 0,
+        thumbnail: res.data.data.thumb || '',
+        videoUrl: res.data.data.url,
+        source: 'agatz'
+      };
+    }
+  } catch (e) {}
+
+  // Try yt-dlp
   const ytResult = await ytdlpDl(url);
   if (ytResult.success && ytResult.videoUrl) return ytResult;
 
@@ -829,30 +728,22 @@ async function xhamsterDl(url) {
   try {
     const res = await axios.get(url, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
       },
       timeout: 20000
     });
     
     const $ = cheerio.load(res.data);
     const ogVideo = $('meta[property="og:video:url"]').attr('content') || $('meta[property="og:video"]').attr('content');
-    const ogTitle = $('meta[property="og:title"]').attr('content');
-    const ogImage = $('meta[property="og:image"]').attr('content');
-    const ogDuration = $('meta[property="video:duration"]').attr('content');
-    
     if (ogVideo) {
       return {
         success: true,
-        title: ogTitle || 'XHamster Video',
-        duration: parseInt(ogDuration) || 0,
-        thumbnail: ogImage || '',
+        title: $('meta[property="og:title"]').attr('content') || 'XHamster Video',
         videoUrl: ogVideo,
         source: 'scraper'
       };
     }
-  } catch (e) {
-    // scraping failed
-  }
+  } catch (e) {}
 
   return { success: false, error: 'XHamster download failed. Please try again later.' };
 }
