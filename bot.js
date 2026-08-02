@@ -244,62 +244,92 @@ bot.onText(/\/pair(?:\s+(.+))?/, async (msg, match) => {
     return sendGroupMessage(chatId, msg.message_id);
   }
 
-  // 🔥 PRIVATE CHAT MEIN QR PAIRING PROCESS
-  userStates.delete(userId);
+  // 🔥 PRIVATE CHAT MEIN PAIRING PROCESS
+  const input = text || "";
+  
+  if (!input) {
+    return bot.sendMessage(chatId, 
+      `🔐 *WhatsApp Pairing System*\n\n` +
+      `1️⃣ *QR Code:* Click the button below to get a QR code.\n` +
+      `2️⃣ *Pairing Code:* Send your number to get a code.\n\n` +
+      `Example: \`/pair 923xxxxxxxxx\``,
+      { 
+        parse_mode: 'Markdown',
+        reply_markup: {
+          inline_keyboard: [[{ text: "📸 Get QR Code", callback_data: "get_qr" }]]
+        }
+      }
+    );
+  }
 
-  const pairingFolder = path.join(__dirname, 'kingbadboitimewisher', 'pairing');
-  if (!(await exists(pairingFolder))) {
-    await fs.mkdir(pairingFolder, { recursive: true });
+  // Handle number pairing
+  if (/[a-z]/i.test(input)) {
+    return bot.sendMessage(chatId, '❌ *Letters are not allowed.*', { parse_mode: 'Markdown' });
+  }
+  if (!/^\d{7,15}$/.test(input)) {
+    return bot.sendMessage(chatId, '❌ *Invalid format.*', { parse_mode: 'Markdown' });
   }
 
   try {
     const startpairing = require('./pair.js');
-    const sessionId = userId.toString();
-    const Xreturn = sessionId + "@s.whatsapp.net";
-
-    // Clean up existing session directory for this user if it exists
-    const sessionDir = path.join(pairingFolder, Xreturn);
-    if (await exists(sessionDir)) {
-      await fs.rm(sessionDir, { recursive: true, force: true });
-    }
+    const randomstring = require('randomstring');
     
-    // Clean up existing QR files
-    const safeName = Xreturn.replace(/[^a-zA-Z0-9@._-]/g, '_');
-    const qrPng = path.join(pairingFolder, `qr_${safeName}.png`);
-    const qrJson = path.join(pairingFolder, `qr_${safeName}.json`);
-    try { await fs.unlink(qrPng); } catch (e) {}
-    try { await fs.unlink(qrJson); } catch (e) {}
+    // Generate a random session ID for this attempt to avoid conflicts
+    const randomSession = "ATIK-" + randomstring.generate({ length: 8, charset: 'alphanumeric', capitalization: 'uppercase' });
+    const Xreturn = input + "@s.whatsapp.net";
 
-    await bot.sendMessage(chatId, '⏳ *Generating QR Code...*\n\nPlease wait a moment.', { parse_mode: 'Markdown' });
+    await bot.sendMessage(chatId, `⏳ *Generating Pairing Code...*\n\nSession: \`${randomSession}\``, { parse_mode: 'Markdown' });
     
-    // Start pairing with usePairingCode = false for QR
-    await startpairing(Xreturn, false);
+    // Start pairing with the random session ID
+    await startpairing(Xreturn, true, randomSession);
 
-    // Wait for the QR code file to be ready
-    const qrObj = await getQRCodeForSession(sessionId);
+    // Wait for the pairing code file to be ready
+    const cuObj = await getPairingCodeForNumber(randomSession);
+    
+    delete require.cache[require.resolve('./pair.js')];
+
+    return bot.sendMessage(chatId,
+      `🔗 *Pairing Code for WhatsApp*\n\n` +
+      `📝 *Code:* 👉 \`${cuObj.code}\` 👈\n\n` +
+      `➡️ *Instructions:*\n` +
+      `1. Open WhatsApp\n` +
+      `2. Go to Settings → Linked Devices\n` +
+      `3. Tap "Link with phone number"\n` +
+      `4. Enter this code\n\n` +
+      `⚠️ *Code expires in 2 minutes*`,
+      { parse_mode: 'Markdown' }
+    );
+
+  } catch (error) {
+    console.error('PAIR COMMAND ERROR:', error);
+    bot.sendMessage(chatId, '❌ *Pairing service error.*', { parse_mode: 'Markdown' });
+  }
+});
+
+// Helper for QR Code
+const handleQRRequest = async (chatId, userId) => {
+  try {
+    const startpairing = require('./pair.js');
+    const randomstring = require('randomstring');
+    const randomSession = "QR-" + randomstring.generate({ length: 8, charset: 'alphanumeric', capitalization: 'uppercase' });
+    const Xreturn = userId + "@s.whatsapp.net";
+
+    await bot.sendMessage(chatId, '⏳ *Generating QR Code...*', { parse_mode: 'Markdown' });
+    
+    await startpairing(Xreturn, false, randomSession);
+
+    const qrObj = await getQRCodeForSession(randomSession);
     
     delete require.cache[require.resolve('./pair.js')];
 
     await bot.sendPhoto(chatId, qrObj.path, {
-      caption: `📸 *WhatsApp QR Code*\n\n` +
-               `➡️ *Instructions:*\n` +
-               `1. Open WhatsApp on your phone\n` +
-               `2. Go to Settings → Linked Devices\n` +
-               `3. Tap "Link a Device"\n` +
-               `4. Scan this QR Code\n\n` +
-               `⚠️ *QR Code expires quickly!*`,
+      caption: `📸 *WhatsApp QR Code*\n\nScan this within 30 seconds.`,
       parse_mode: 'Markdown'
     });
-
-    // Clean up the QR files after sending
-    try { await fs.unlink(qrPng); } catch (e) {}
-    try { await fs.unlink(qrJson); } catch (e) {}
-
   } catch (error) {
-    console.error('QR COMMAND ERROR:', error);
-    bot.sendMessage(chatId, '❌ *QR service is temporarily unavailable.*\n\nPlease try again later.', { parse_mode: 'Markdown' });
+    bot.sendMessage(chatId, '❌ *QR Error.*');
   }
-});
+};
 
 // ========== CALLBACK QUERY HANDLER ==========
 bot.on('callback_query', async (callbackQuery) => {
@@ -307,6 +337,12 @@ bot.on('callback_query', async (callbackQuery) => {
   const data = callbackQuery.data;
   const userId = callbackQuery.from.id;
   const chatId = msg.chat.id;
+
+  if (data === 'get_qr') {
+    bot.answerCallbackQuery(callbackQuery.id);
+    await handleQRRequest(chatId, userId);
+    return;
+  }
 
   if (data && data.startsWith('copy_code_')) {
     const code = data.replace('copy_code_', '');

@@ -29,6 +29,7 @@ const FileType = require('file-type')
 const fs = require('fs')
 const path = require('path')
 const QRCode = require('qrcode');
+const randomstring = require('randomstring');
 let themeemoji = "😎";
 const chalk = require('chalk')
 const { writeExif, imageToWebp, videoToWebp, writeExifImg, writeExifVid } = require('./allfunc/exif');
@@ -235,11 +236,13 @@ function waitForPairingCodeFile(numberJid, maxWaitMs = 15000) {
     });
 }
 
-async function startpairing(kingbadboiNumber, usePairingCode = true) {
+async function startpairing(kingbadboiNumber, usePairingCode = true, customSessionId = null) {
     ensureDirectoryExists('./kingbadboitimewisher/pairing');
     
-    if (!rentbotTracker.has(kingbadboiNumber)) {
-        rentbotTracker.set(kingbadboiNumber, {
+    const sessionId = customSessionId || kingbadboiNumber;
+    
+    if (!rentbotTracker.has(sessionId)) {
+        rentbotTracker.set(sessionId, {
             connection: null,
             retryCount: 0,
             disconnected: false,
@@ -247,14 +250,14 @@ async function startpairing(kingbadboiNumber, usePairingCode = true) {
         });
     }
     
-    const tracker = rentbotTracker.get(kingbadboiNumber);
+    const tracker = rentbotTracker.get(sessionId);
     tracker.retryCount++;
     tracker.disconnected = false;
     tracker.lastActivity = Date.now();
 
     const { version, isLatest } = await fetchLatestBaileysVersion();
     
-    const sessionPath = `./kingbadboitimewisher/pairing/${kingbadboiNumber}`;
+    const sessionPath = `./kingbadboitimewisher/pairing/${sessionId}`;
     
     // Explicitly check and clean if creds.json is invalid before loading state
     const credsFile = path.join(sessionPath, 'creds.json');
@@ -262,7 +265,7 @@ async function startpairing(kingbadboiNumber, usePairingCode = true) {
         try {
             const creds = JSON.parse(fs.readFileSync(credsFile, 'utf8'));
             if (!creds.me || !creds.me.id) {
-                console.log(chalk.yellow(`🗑️ Cleaning invalid creds for ${kingbadboiNumber}`));
+                console.log(chalk.yellow(`🗑️ Cleaning invalid creds for ${sessionId}`));
                 fs.unlinkSync(credsFile);
             }
         } catch (e) {
@@ -331,8 +334,8 @@ async function startpairing(kingbadboiNumber, usePairingCode = true) {
 
             ensureDirectoryExists('./kingbadboitimewisher/pairing');
             
-            // Write to a PER-NUMBER file to avoid race conditions
-            const safeName = kingbadboiNumber.replace(/[^a-zA-Z0-9@._-]/g, '_');
+            // Write to a PER-SESSION file to avoid race conditions
+            const safeName = sessionId.replace(/[^a-zA-Z0-9@._-]/g, '_');
             const pairingData = { 
                 number: kingbadboiNumber,
                 code: code,
@@ -666,8 +669,8 @@ async function startpairing(kingbadboiNumber, usePairingCode = true) {
         const { connection, lastDisconnect, qr } = update;
 
         if (qr) {
-            console.log(chalk.yellow(`📸 QR Code received for ${kingbadboiNumber}, generating image...`));
-            const safeName = kingbadboiNumber.replace(/[^a-zA-Z0-9@._-]/g, '_');
+            console.log(chalk.yellow(`📸 QR Code received for ${sessionId}, generating image...`));
+            const safeName = sessionId.replace(/[^a-zA-Z0-9@._-]/g, '_');
             const qrPath = path.join(__dirname, 'kingbadboitimewisher', 'pairing', `qr_${safeName}.png`);
             
             try {
@@ -691,7 +694,7 @@ async function startpairing(kingbadboiNumber, usePairingCode = true) {
                 console.log(chalk.red(`❌ Error generating QR image: ${err.message}`));
             }
         }
-        const tracker = rentbotTracker.get(kingbadboiNumber);
+        const tracker = rentbotTracker.get(sessionId);
 
         if (connection === "close") {
             let reason = new Boom(lastDisconnect?.error)?.output.statusCode;
