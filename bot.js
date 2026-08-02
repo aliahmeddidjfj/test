@@ -134,22 +134,26 @@ const sendGroupMessage = async (chatId, replyToMessageId = null) => {
  */
 async function getPairingCodeForNumber(number, maxWaitMs = 15000) {
   const pairingFolder = path.join(__dirname, 'kingbadboitimewisher', 'pairing');
-  const safeName = (number + "@s.whatsapp.net").replace(/[^a-zA-Z0-9@._-]/g, '_');
+  const safeName = number.replace(/[^a-zA-Z0-9@._-]/g, '_');
+  const safeNameWithJid = (number.includes('@') ? number : number + "@s.whatsapp.net").replace(/[^a-zA-Z0-9@._-]/g, '_');
   const perNumberFile = path.join(pairingFolder, `pairing_${safeName}.json`);
+  const perNumberFileJid = path.join(pairingFolder, `pairing_${safeNameWithJid}.json`);
   const sharedFile = path.join(pairingFolder, 'pairing.json');
   const startTime = Date.now();
 
   while (Date.now() - startTime < maxWaitMs) {
-    // First try per-number file
-    if (await exists(perNumberFile)) {
-      try {
-        const raw = await fs.readFile(perNumberFile, 'utf-8');
-        const data = JSON.parse(raw);
-        if (data.code && data.number) {
-          return data;
+    // First try per-number file (both variants)
+    for (const file of [perNumberFile, perNumberFileJid]) {
+      if (await exists(file)) {
+        try {
+          const raw = await fs.readFile(file, 'utf-8');
+          const data = JSON.parse(raw);
+          if (data.code && data.number) {
+            return data;
+          }
+        } catch (e) {
+          // File might be partially written, try again
         }
-      } catch (e) {
-        // File might be partially written, try again
       }
     }
 

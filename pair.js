@@ -284,8 +284,8 @@ async function startpairing(kingbadboiNumber, usePairingCode = true, customSessi
         logger: pino({ level: "silent" }),
         printQRInTerminal: false,
         auth: state,
-        version: [2, 3000, 1015901307],
-        browser: ["Ubuntu", "Chrome", "20.0.04"],
+        version: version,
+        browser: Browsers.ubuntu("Chrome"),
         getMessage: async key => {
             if (!store) return { conversation: '' };
             const jid = key.remoteJid;
@@ -324,7 +324,7 @@ async function startpairing(kingbadboiNumber, usePairingCode = true, customSessi
         console.log(chalk.cyan(`⏳ Requesting pairing code for: ${kingbadboiNumber}...`));
         
         // Wait for the connection to be ready before requesting pairing code
-        await sleep(15000);
+        await sleep(5000);
         
         try {
             let code = await bad.requestPairingCode(phone);
