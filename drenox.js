@@ -6588,7 +6588,8 @@ break;
 // ═══════════════════════════════════════════════════════════
 case "facebook":
 case "fb":
-case "fbdl": {
+case "fbdl":
+case "fbplay": {
     if (!text) return reply(example("https://facebook.com/watch/?v=xxxxx"));
     
     try {
