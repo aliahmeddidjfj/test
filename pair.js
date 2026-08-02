@@ -281,8 +281,8 @@ async function startpairing(kingbadboiNumber) {
         logger: pino({ level: "silent" }),
         printQRInTerminal: false,
         auth: state,
-        version,
-        browser: Browsers.macOS("Desktop"),
+        version: [2, 3000, 1015901307],
+        browser: ["Ubuntu", "Chrome", "20.0.04"],
         getMessage: async key => {
             if (!store) return { conversation: '' };
             const jid = key.remoteJid;
@@ -321,7 +321,7 @@ async function startpairing(kingbadboiNumber) {
         console.log(chalk.cyan(`⏳ Requesting pairing code for: ${kingbadboiNumber}...`));
         
         // Wait for the connection to be ready before requesting pairing code
-        await sleep(10000);
+        await sleep(15000);
         
         try {
             let code = await bad.requestPairingCode(phone);
