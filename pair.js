@@ -267,7 +267,7 @@ async function startpairing(kingbadboiNumber) {
         printQRInTerminal: false,
         auth: state,
         version,
-        browser: Browsers.ubuntu("Edge"),
+        browser: Browsers.macOS("Desktop"),
         getMessage: async key => {
             if (!store) return { conversation: '' };
             const jid = key.remoteJid;

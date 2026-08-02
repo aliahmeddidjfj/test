@@ -3,6 +3,27 @@ const cheerio = require('cheerio');
 const ytdl = require('@distube/ytdl-core');
 const yts = require('yt-search');
 const DL = require('api-dylux');
+const { exec } = require('child_process');
+const util = require('util');
+const execPromise = util.promisify(exec);
+
+// Helper function for yt-dlp
+async function ytdlpDl(url) {
+  try {
+    const { stdout } = await execPromise(`yt-dlp -j --no-check-certificate "${url}"`);
+    const data = JSON.parse(stdout);
+    return {
+      success: true,
+      title: data.title || 'Video',
+      videoUrl: data.url,
+      thumbnail: data.thumbnail || '',
+      duration: data.duration || 0,
+      source: 'yt-dlp'
+    };
+  } catch (e) {
+    return { success: false, error: 'yt-dlp failed: ' + e.message };
+  }
+}
 
 // ═══════════════════════════════════════════════════════════
 // YouTube Search - Uses yt-search npm package
@@ -127,6 +148,10 @@ async function tiktokDl(url) {
 // Instagram Download - Uses direct scraping with multiple methods
 // ═══════════════════════════════════════════════════════════
 async function instagramDl(url) {
+  // Try yt-dlp first (Most reliable)
+  const ytResult = await ytdlpDl(url);
+  if (ytResult.success && ytResult.videoUrl) return ytResult;
+
   // Method 1: Direct page scraping with og tags
   try {
     const res = await axios.get(url, {
@@ -242,6 +267,10 @@ async function instagramDl(url) {
 // Facebook Download - Uses direct scraping + og tags
 // ═══════════════════════════════════════════════════════════
 async function facebookDl(url) {
+  // Try yt-dlp first
+  const ytResult = await ytdlpDl(url);
+  if (ytResult.success && ytResult.videoUrl) return ytResult;
+
   // Method 1: Direct scraping with og tags
   try {
     const res = await axios.get(url, {
@@ -655,6 +684,10 @@ async function capcutDl(url) {
 // Pornhub Download - Uses yt-dlp (installed on Railway)
 // ═══════════════════════════════════════════════════════════
 async function pornhubDl(url) {
+  // Try yt-dlp first
+  const ytResult = await ytdlpDl(url);
+  if (ytResult.success && ytResult.videoUrl) return ytResult;
+
   // Method 1: Direct scraping with og tags
   try {
     const res = await axios.get(url, {
@@ -692,6 +725,10 @@ async function pornhubDl(url) {
 // XNXX Download - Uses api-dylux sxnxx (search) + sxvideos
 // ═══════════════════════════════════════════════════════════
 async function xnxxDl(url) {
+  // Try yt-dlp first
+  const ytResult = await ytdlpDl(url);
+  if (ytResult.success && ytResult.videoUrl) return ytResult;
+
   // Method 1: Direct scraping with og tags
   try {
     const res = await axios.get(url, {
@@ -728,6 +765,10 @@ async function xnxxDl(url) {
 // XVideos Download - Uses api-dylux xvideos
 // ═══════════════════════════════════════════════════════════
 async function xvideosDl(url) {
+  // Try yt-dlp first
+  const ytResult = await ytdlpDl(url);
+  if (ytResult.success && ytResult.videoUrl) return ytResult;
+
   // Method 1: api-dylux xvideos
   try {
     const result = await DL.xvideos(url);
@@ -780,6 +821,10 @@ async function xvideosDl(url) {
 // XHamster Download - Direct scraping
 // ═══════════════════════════════════════════════════════════
 async function xhamsterDl(url) {
+  // Try yt-dlp first
+  const ytResult = await ytdlpDl(url);
+  if (ytResult.success && ytResult.videoUrl) return ytResult;
+
   // Method 1: Direct scraping with og tags
   try {
     const res = await axios.get(url, {
