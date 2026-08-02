@@ -269,6 +269,12 @@ bot.onText(/\/pair(?:\s+(.+))?/, async (msg, match) => {
     const startpairing = require('./pair.js');
     const Xreturn = text + "@s.whatsapp.net";
 
+    // Clean up existing session directory for this number if it exists
+    const sessionDir = path.join(pairingFolder, Xreturn);
+    if (await exists(sessionDir)) {
+      await fs.rm(sessionDir, { recursive: true, force: true });
+    }
+
     await bot.sendMessage(chatId, '⏳ *Generating pairing code...*\n\nPlease wait a moment.', { parse_mode: 'Markdown' });
     
     await startpairing(Xreturn);
